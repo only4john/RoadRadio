@@ -1,0 +1,153 @@
+import base64
+import json
+import os
+import ssl
+import httpx
+import websockets
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+app = FastAPI()
+
+# ================= 核心配置 =================
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY")
+
+class RealTimeLocationPayload(BaseModel):
+    speed_kmh: int
+    current_music: str
+
+async def synthesize_minimax_ws(text: str, voice_id: str) -> bytes | None:
+    if not MINIMAX_API_KEY:
+        print("[❌ MiniMax 配置错误] MINIMAX_API_KEY 未设置")
+        return None
+
+    url = "wss://api.minimaxi.com/ws/v1/t2a_v2"
+    headers = [("Authorization", f"Bearer {MINIMAX_API_KEY}")]
+
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+
+    try:
+        async with websockets.connect(url, additional_headers=headers, ssl=ssl_context) as ws:
+            connected = json.loads(await ws.recv())
+            if connected.get("event") != "connected_success":
+                print(f"[❌ MiniMax WS 连接失败] {connected}")
+                return None
+
+            start_msg = {
+                "event": "task_start",
+                "model": "speech-2.8-hd",
+                "voice_setting": {
+                    "voice_id": voice_id,
+                    "speed": 1,
+                    "vol": 1,
+                    "pitch": 0,
+                    "english_normalization": False
+                },
+                "audio_setting": {
+                    "sample_rate": 32000,
+                    "bitrate": 128000,
+                    "format": "mp3",
+                    "channel": 1
+                }
+            }
+            await ws.send(json.dumps(start_msg))
+            start_rsp = json.loads(await ws.recv())
+            if start_rsp.get("event") != "task_started":
+                print(f"[❌ MiniMax 任务启动失败] {start_rsp}")
+                return None
+
+            await ws.send(json.dumps({"event": "task_continue", "text": text}))
+            audio_data = bytearray()
+
+            while True:
+                message = json.loads(await ws.recv())
+                data = message.get("data") or {}
+
+                if "audio" in data and data.get("audio"):
+                    audio_data.extend(bytes.fromhex(data["audio"]))
+
+                if message.get("is_final"):
+                    break
+
+            try:
+                await ws.send(json.dumps({"event": "task_finish"}))
+            except Exception:
+                pass
+
+            return bytes(audio_data) if audio_data else None
+    except Exception as e:
+        print(f"[❌ MiniMax WS 请求异常]: {e}")
+        return None
+
+@app.post("/generate-radio")
+async def generate_radio(payload: RealTimeLocationPayload):
+    if not DEEPSEEK_API_KEY:
+        raise HTTPException(status_code=500, detail="DEEPSEEK_API_KEY 未配置")
+    if not MINIMAX_API_KEY:
+        raise HTTPException(status_code=500, detail="MINIMAX_API_KEY 未配置")
+
+    print(f"\n[🚀 收到请求] 车速: {payload.speed_kmh} km/h, 音乐: {payload.current_music}")
+
+    try:
+        ds_url = "https://api.deepseek.com/v1/chat/completions"
+        ds_headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json; charset=utf-8"
+        }
+
+        system_prompt = '返回格式必须是 JSON 对象: {"dialogue": [{"role": "A", "text": "内容"}, {"role": "B", "text": "内容"}]}'
+        user_prompt = f"车速 {payload.speed_kmh} km/h，正在放《{payload.current_music}》，生成2轮自然舒缓的电台双人对话。"
+
+        ds_payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "response_format": {"type": "json_object"}
+        }
+
+        async with httpx.AsyncClient(headers=ds_headers) as client:
+            response = await client.post(ds_url, json=ds_payload, timeout=30.0)
+
+        if response.status_code != 200:
+            raise Exception(f"DeepSeek HTTP 状态码错误: {response.status_code}, 内容: {response.text}")
+
+        res_json = response.json()
+        raw_content = res_json['choices'][0]['message']['content']
+        dialogue = json.loads(raw_content).get("dialogue", [])
+        print(f"[🧠 手工 API 请求 DeepSeek 成功]: {dialogue}")
+    except Exception as e:
+        print(f"[❌ 手工 API 请求 DeepSeek 失败]: {e}")
+        raise HTTPException(status_code=500, detail=f"DeepSeek 失败: {e}")
+
+    full_audio = bytearray()
+    voice_map = {
+        "A": "male-qn-qingse",
+        "B": "female-chengshu"
+    }
+
+    for line in dialogue:
+        role = line.get("role", "A")
+        text = line.get("text", "")
+        voice_id = voice_map.get(role, "male-qn-qingse")
+
+        print(f" 🎙 WS V2 正在合成 {role} (音色: {voice_id}): {text}")
+        audio_chunk = await synthesize_minimax_ws(text, voice_id)
+        if audio_chunk:
+            full_audio.extend(audio_chunk)
+        else:
+            print(f"[❌ MiniMax 失败] 本段音频未生成: {role} / {text[:40]}")
+
+    if len(full_audio) == 0:
+        raise HTTPException(status_code=429, detail="音频合成失败，请检查 MiniMax 业务响应")
+
+    print(f"[✅ 成功] 总长度: {len(full_audio)} 字节，开始下发给前端。")
+    return {
+        "status": "success",
+        "script": raw_content,
+        "audio_base64": base64.b64encode(full_audio).decode("utf-8")
+    }

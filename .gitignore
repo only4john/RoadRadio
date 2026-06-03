@@ -1,0 +1,6 @@
+/venv
+/backend/landmark_history.db
+*.pyc
+__pycache__/
+.DS_Store
+output.mp3

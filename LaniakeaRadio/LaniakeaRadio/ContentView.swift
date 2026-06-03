@@ -1,0 +1,570 @@
+import SwiftUI
+import AVFoundation
+import Combine
+import CoreLocation
+import MediaPlayer
+
+// ==========================================
+// 1. 后台大管家：双播放器架构（BGM + 人声）
+// ==========================================
+class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocationManagerDelegate {
+    
+    var voicePlayer: AVAudioPlayer?
+    var bgmPlayer: AVAudioPlayer?
+    private let locationManager = CLLocationManager()
+
+    @Published var latitude: Double = 0
+    @Published var longitude: Double = 0
+    @Published var speedKmh: Int = 0
+    @Published var headingDeg: Int = 0
+    @Published var isLoading: Bool = false
+    @Published var selectedPOIName: String = ""
+    @Published var broadcastFrequency: Int = 50 // 0 = 最低，只播著名景点；100 = 最高，频繁播报
+
+    @Published var weatherDescription: String = ""
+    @Published var temperature: Int = 0
+    @Published var currentMusicName: String = "无"
+    @Published var generatedAudioFilename: String = ""
+
+    // 模拟器测试覆盖值
+    @Published var simulatedLatitude: Double = 30.5444
+    @Published var simulatedLongitude: Double = 114.3665
+    @Published var simulatedSpeedKmh: Int = 70
+    @Published var simulatedHeadingDeg: Int = 0
+
+    // 简化的已选 POI 信息
+    private var selectedPOI: [String: Any]? = nil
+
+    var displayLatitude: Double {
+        #if targetEnvironment(simulator)
+        return simulatedLatitude
+        #else
+        return latitude
+        #endif
+    }
+
+    var displayLongitude: Double {
+        #if targetEnvironment(simulator)
+        return simulatedLongitude
+        #else
+        return longitude
+        #endif
+    }
+
+    var displaySpeedKmh: Int {
+        #if targetEnvironment(simulator)
+        return simulatedSpeedKmh
+        #else
+        return speedKmh
+        #endif
+    }
+
+    var displayHeadingDeg: Int {
+        #if targetEnvironment(simulator)
+        return simulatedHeadingDeg
+        #else
+        return headingDeg
+        #endif
+    }
+    
+    @Published var currentScript: String = ""
+    @Published var isPlaying: Bool = false
+    
+    override init() {
+        super.init()
+        setupAudioSession()
+        setupAndPlayBGM()
+        setupLocation()
+        setupNowPlayingObserver()
+    }
+
+    private func setupLocation() {
+        locationManager.delegate = self
+        locationManager.requestWhenInUseAuthorization()
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.distanceFilter = 10
+        if CLLocationManager.headingAvailable() {
+            locationManager.headingFilter = 5
+            locationManager.startUpdatingHeading()
+        }
+        locationManager.startUpdatingLocation()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        MPMusicPlayerController.systemMusicPlayer.endGeneratingPlaybackNotifications()
+    }
+
+    private func setupNowPlayingObserver() {
+        let player = MPMusicPlayerController.systemMusicPlayer
+        player.beginGeneratingPlaybackNotifications()
+        NotificationCenter.default.addObserver(self, selector: #selector(nowPlayingItemChanged), name: .MPMusicPlayerControllerNowPlayingItemDidChange, object: player)
+        if let item = player.nowPlayingItem {
+            let title = item.title ?? "Apple Music"
+            DispatchQueue.main.async { self.currentMusicName = title }
+        }
+    }
+
+    @objc private func nowPlayingItemChanged(notification: Notification) {
+        let player = MPMusicPlayerController.systemMusicPlayer
+        if let item = player.nowPlayingItem {
+            let title = item.title ?? "Apple Music"
+            DispatchQueue.main.async { self.currentMusicName = title }
+        }
+    }
+
+    // CLLocationManagerDelegate
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let loc = locations.last else { return }
+        DispatchQueue.main.async {
+            self.latitude = loc.coordinate.latitude
+            self.longitude = loc.coordinate.longitude
+            self.speedKmh = Int(max(0, loc.speed) * 3.6)
+            // 优先使用 GPS 路径的 course 作为方向（若有效），否则保留原有 heading
+            if loc.course >= 0 {
+                self.headingDeg = Int(loc.course)
+            }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        DispatchQueue.main.async {
+            // 使用 trueHeading (-1 表示无效)
+            let heading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+            self.headingDeg = Int(heading)
+        }
+    }
+    
+    private func setupAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default)
+            try session.setActive(true)
+        } catch {
+            print("❌ 音频会话激活失败: \(error)")
+        }
+    }
+    
+    // 加载并循环播放本地 BGM
+    private func setupAndPlayBGM() {
+        guard let bgmURL = Bundle.main.url(forResource: "bgm", withExtension: "mp3") else {
+            print("⚠️ 找不到 bgm.mp3！请确保文件已加入项目并勾选了 Target Membership")
+            return
+        }
+        
+        do {
+            bgmPlayer = try AVAudioPlayer(contentsOf: bgmURL)
+            bgmPlayer?.numberOfLoops = -1 // 无限循环
+            bgmPlayer?.volume = 0.5       // 初始满音量
+            bgmPlayer?.prepareToPlay()
+            bgmPlayer?.play()
+            // 显示 BGM 文件名为当前音乐（除非系统播放其他音乐）
+            DispatchQueue.main.async { self.currentMusicName = bgmURL.lastPathComponent }
+            print("🎵 BGM 启动成功！")
+        } catch {
+            print("❌ BGM 加载失败: \(error)")
+        }
+    }
+    
+    // 内部闪避：平滑压低 BGM
+    private func lowerBGMVolume() {
+        bgmPlayer?.setVolume(0.1, fadeDuration: 0.5)
+        print("🔊 BGM 已智能压低")
+    }
+    
+    // 内部闪避：平滑恢复 BGM
+    private func restoreBGMVolume() {
+        bgmPlayer?.setVolume(0.5, fadeDuration: 1.0)
+        print("✅ BGM 音量已恢复")
+    }
+    
+    // 监听人声播放结束
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        if player == voicePlayer {
+            DispatchQueue.main.async {
+                self.isPlaying = false
+                self.restoreBGMVolume() // 人声结束，恢复 BGM
+                // 记录本次介绍
+                self.recordLandmarkIntro()
+            }
+        }
+    }
+    
+    func generateAndPlayRadio(speed: Int, music: String) async {
+        // 在生成前，总是刷新一次候选 POI，确保方向/速度修改后生效
+        selectedPOI = nil
+        await fetchUpcomingLandmarks()
+
+        // 尝试获取天气和时间信息以丰富 payload
+        await fetchWeatherIfNeeded()
+
+        guard let url = URL(string: "http://127.0.0.1:8000/generate-radio") else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        var poiName = ""
+        if let poi = selectedPOI, let name = poi["name"] as? String {
+            poiName = name
+        }
+
+        let payload: [String: Any] = [
+                    "lat": self.displayLatitude,
+                    "lon": self.displayLongitude,
+                    "speed_kmh": self.displaySpeedKmh,
+                    "heading": self.displayHeadingDeg,
+                    "familiarity_level": 1,
+                    "current_music": music,
+                    "poi_name": poiName,
+                    "frequency_level": broadcastFrequency,
+                    "weather": weatherDescription,
+                    "temperature": temperature,
+                    "time_of_day": formattedTimeOfDay()
+                ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return }
+            
+            if let encodedScript = httpResponse.value(forHTTPHeaderField: "X-Radio-Script"),
+               let decodedScript = encodedScript.removingPercentEncoding {
+                DispatchQueue.main.async {
+                    self.currentScript = decodedScript
+                }
+            }
+            
+            DispatchQueue.main.async {
+                do {
+                    self.isLoading = false
+                    // 将返回的音频写入临时文件，这样可以显示文件名
+                    let tmpName = "radio_\(Int(Date().timeIntervalSince1970)).mp3"
+                    let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent(tmpName)
+                    try data.write(to: tmpURL)
+                    self.generatedAudioFilename = tmpName
+
+                    self.lowerBGMVolume() // 播放人声前，先压低 BGM
+
+                    self.voicePlayer = try AVAudioPlayer(contentsOf: tmpURL)
+                    self.voicePlayer?.delegate = self
+                    self.voicePlayer?.prepareToPlay()
+                    self.voicePlayer?.play()
+                    self.isPlaying = true
+                } catch {
+                    print("❌ 音频播放失败: \(error)")
+                    self.restoreBGMVolume() // 如果报错，也要把 BGM 恢复
+                    self.isLoading = false
+                }
+            }
+        } catch {
+            print("❌ 网络请求失败: \(error.localizedDescription)")
+            DispatchQueue.main.async { self.isLoading = false }
+        }
+    }
+
+    // 获取候选 POI 并选中一个（将结果保存在 selectedPOI）
+    func fetchUpcomingLandmarks() async {
+        guard let url = URL(string: "http://127.0.0.1:8000/upcoming-landmarks") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "lat": displayLatitude,
+            "lon": displayLongitude,
+            "speed_kmh": displaySpeedKmh,
+            "heading": displayHeadingDeg,
+            "max_results": 5,
+            "frequency_level": broadcastFrequency
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return }
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            if let selected = json?["selected_landmark"] as? [String: Any] {
+                self.selectedPOI = selected
+                if let name = selected["name"] as? String {
+                    DispatchQueue.main.async {
+                        self.currentScript = "准备播报：\(name)"
+                        self.selectedPOIName = name
+                    }
+                }
+            } else if let candidates = json?["candidates"] as? [[String: Any]], let first = candidates.first {
+                self.selectedPOI = first
+                if let name = first["name"] as? String {
+                    DispatchQueue.main.async {
+                        self.currentScript = "准备播报：\(name)"
+                        self.selectedPOIName = name
+                    }
+                }
+            }
+        } catch {
+            print("❌ 获取候选 POI 失败: \(error)")
+        }
+    }
+
+    // Fetch weather from Open-Meteo (no API key required) and update weatherDescription & temperature
+    func fetchWeatherIfNeeded() async {
+        if latitude == 0 && longitude == 0 {
+            return
+        }
+
+        let urlStr = "https://api.open-meteo.com/v1/forecast?latitude=\(latitude)&longitude=\(longitude)&current_weather=true&timezone=auto"
+        guard let url = URL(string: urlStr) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return }
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let current = json["current_weather"] as? [String: Any] {
+                if let temp = current["temperature"] as? Double {
+                    DispatchQueue.main.async { self.temperature = Int(round(temp)) }
+                }
+                if let code = current["weathercode"] as? Int {
+                    let desc = weatherCodeToDescription(code: code)
+                    DispatchQueue.main.async { self.weatherDescription = desc }
+                }
+            }
+        } catch {
+            print("❌ 获取天气失败: \(error)")
+        }
+    }
+
+    func weatherCodeToDescription(code: Int) -> String {
+        // 简单映射，参考 Open-Meteo weathercode
+        switch code {
+        case 0: return "晴"
+        case 1, 2, 3: return "多云"
+        case 45, 48: return "雾"
+        case 51, 53, 55: return "小雨"
+        case 61, 63, 65: return "降雨"
+        case 71, 73, 75: return "降雪"
+        case 80, 81, 82: return "阵雨"
+        case 95, 96, 99: return "雷暴"
+        default: return "未知"
+        }
+    }
+
+    func formattedTimeOfDay() -> String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 6..<12: return "上午\(hour)点"
+        case 12..<18: return "下午\(hour - 12)点"
+        case 18..<24: return "晚上\(hour - 12)点"
+        default: return "凌晨\(hour)点"
+        }
+    }
+
+    // 播放结束时记录介绍
+    private func recordLandmarkIntro() {
+        guard let poi = selectedPOI, let poi_id = poi["poi_id"] as? String, let name = poi["name"] as? String, let location = poi["location"] as? String else { return }
+        guard let url = URL(string: "http://127.0.0.1:8000/record-landmark") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: Any] = [
+            "poi_id": poi_id,
+            "name": name,
+            "location": location,
+            "address": poi["address"] as? String ?? "",
+            "type": poi["type"] as? String ?? ""
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("❌ recordLandmarkIntro failed: \(error)")
+                return
+            }
+            print("✅ recordLandmarkIntro succeeded for \(poi_id)")
+        }.resume()
+    }
+}
+
+// ==========================================
+// 2. 前台舞台：特斯拉级上下分屏 UI
+// ==========================================
+struct ContentView: View {
+    @StateObject private var radioManager = RadioManager()
+    
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                // 上半部：环境感知与音乐状态区
+                ZStack {
+                    LinearGradient(gradient: Gradient(colors: [Color.black, Color.blue.opacity(0.8)]), startPoint: .topLeading, endPoint: .bottomTrailing)
+                    
+                    VStack(spacing: 15) {
+                        Image(systemName: "waveform.circle")
+                            .font(.system(size: 60))
+                            .foregroundColor(.white)
+                            .symbolEffect(.bounce, value: radioManager.isPlaying)
+                        
+                        Text("Laniakea Radio")
+                            .font(.headline)
+                            .foregroundColor(.gray)
+                        
+                        Text("creep")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("当前车速: \(radioManager.displaySpeedKmh) km/h · 方向: \(radioManager.displayHeadingDeg)°")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.8))
+                        HStack(spacing: 12) {
+                            if !radioManager.weatherDescription.isEmpty {
+                                Text("天气: \(radioManager.weatherDescription) \(radioManager.temperature)℃")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
+                            Text(radioManager.formattedTimeOfDay())
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+
+                        // 小字显示经纬度与当前音乐信息
+                        Text("坐标: \(String(format: "%.5f", radioManager.displayLatitude)), \(String(format: "%.5f", radioManager.displayLongitude))  ·  当前音乐: \(radioManager.currentMusicName)")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.75))
+
+                        if !radioManager.generatedAudioFilename.isEmpty {
+                            Text("播放文件: \(radioManager.generatedAudioFilename)")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+
+                        #if targetEnvironment(simulator)
+                        VStack(spacing: 4) {
+                            Text("模拟器固定测试值")
+                                .font(.caption2)
+                                .foregroundColor(.yellow)
+                            HStack {
+                                Text("速度")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Slider(value: Binding(get: { Double(radioManager.simulatedSpeedKmh) }, set: { radioManager.simulatedSpeedKmh = Int($0) }), in: 0...120, step: 5)
+                                Text("\(radioManager.simulatedSpeedKmh) km/h")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+                            HStack {
+                                Text("方向")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Slider(value: Binding(get: { Double(radioManager.simulatedHeadingDeg) }, set: { radioManager.simulatedHeadingDeg = Int($0) }), in: 0...360, step: 5)
+                                Text("\(radioManager.simulatedHeadingDeg)°")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+                            HStack {
+                                Text("起点")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Text("武汉大学附近")
+                                    .font(.caption2)
+                                    .foregroundColor(.yellow)
+                            }
+                        }
+                        #endif
+
+                        if !radioManager.selectedPOIName.isEmpty {
+                            Text("目标：\(radioManager.selectedPOIName)")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    }
+                }
+                .frame(height: geometry.size.height / 2)
+                
+                // 下半部：台词展示与交互区
+                ZStack {
+                    Color(UIColor.systemBackground)
+                    
+                    VStack {
+                        ScrollView {
+                            Text(radioManager.currentScript.isEmpty ? "电台待命中...\n点击下方按钮获取沿途风光播报。" : radioManager.currentScript)
+                                .font(.body)
+                                .lineSpacing(8)
+                                .multilineTextAlignment(.center)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                        }
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(15)
+                        .padding()
+                        
+                        Spacer()
+
+                        // 频率滑杆
+                        VStack(spacing: 8) {
+                            HStack {
+                                Text("播报频率")
+                                Spacer()
+                                Text(broadcastFrequencyDescription(frequency: radioManager.broadcastFrequency))
+                                    .foregroundColor(.secondary)
+                            }
+                            Slider(value: Binding(get: {
+                                Double(radioManager.broadcastFrequency)
+                            }, set: { newVal in
+                                radioManager.broadcastFrequency = Int(newVal)
+                            }), in: 0...100, step: 1)
+                        }
+                        .padding([.leading, .trailing], 24)
+
+                        Button(action: {
+                            Task {
+                                radioManager.isLoading = true
+                                await radioManager.generateAndPlayRadio(speed: radioManager.displaySpeedKmh, music: radioManager.currentMusicName)
+                            }
+                        }) {
+                            if radioManager.isLoading {
+                                ProgressView()
+                                    .frame(width: 220, height: 55)
+                            } else {
+                                HStack {
+                                    Image(systemName: radioManager.isPlaying ? "speaker.wave.3.fill" : "mic.fill")
+                                    Text(radioManager.isPlaying ? "播报中..." : "开始播报 (Talk)")
+                                }
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .frame(width: 220, height: 55)
+                                .background(radioManager.isPlaying ? Color.green : Color.blue)
+                                .cornerRadius(27.5)
+                                .shadow(radius: 5)
+                            }
+                        }
+                        .disabled(radioManager.isPlaying)
+                        .padding(.bottom, 40)
+                    }
+                }
+                .frame(height: geometry.size.height / 2)
+            }
+        }
+        .edgesIgnoringSafeArea(.all)
+    }
+}
+
+#Preview {
+    ContentView()
+}
+
+// MARK: - Helpers
+
+func broadcastFrequencyDescription(frequency: Int) -> String {
+    switch frequency {
+    case 0..<20:
+        return "仅著名地标"
+    case 20..<50:
+        return "稀疏播报"
+    case 50..<80:
+        return "中等频率"
+    default:
+        return "高频（可达每分钟）"
+    }
+}
