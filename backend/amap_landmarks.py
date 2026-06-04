@@ -8,10 +8,10 @@ from pydantic import BaseModel
 from config import AMAP_API_KEY
 
 AMAP_PLACE_AROUND_URL = "https://restapi.amap.com/v3/place/around"
-AMAP_SEARCH_KEYWORDS = "历史建筑|文化标志|文化地标|旅游景点|博物馆|纪念馆"
-MIN_SEARCH_RADIUS_METERS = 500
-MAX_SEARCH_RADIUS_METERS = 5000
-PREVIEW_LEAD_MINUTES = 3
+AMAP_SEARCH_KEYWORDS = "历史建筑|景点|博物馆|学校"
+MIN_SEARCH_RADIUS_METERS = 100
+MAX_SEARCH_RADIUS_METERS = 2000
+PREVIEW_LEAD_MINUTES = 2
 MIN_DISTANCE_CONSIDERED = 150
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", os.path.join(os.path.dirname(__file__), "landmark_history.db"))
 
@@ -113,9 +113,15 @@ def record_landmark_introduction(poi_id: str, name: str, location: str, address:
 
 def normalize_search_radius(speed_kmh: float) -> int:
     if speed_kmh <= 0:
-        return 1000
-    radius = int(speed_kmh * 1000.0 / 20.0)
-    return max(MIN_SEARCH_RADIUS_METERS, min(radius, MAX_SEARCH_RADIUS_METERS))
+        return 100
+    elif speed_kmh <= 30:
+        return 100
+    elif speed_kmh <= 70:
+        return 200
+    elif speed_kmh <= 100:
+        return 500
+    else:
+        return 2000
 
 
 def format_location(lat: float, lon: float) -> str:
@@ -141,6 +147,10 @@ def compute_selection_weight(introduced_count: int, distance_m: int, is_ahead: b
     
     # 太近（可能已路过）或不在前进方向：排除
     if distance_m < MIN_DISTANCE_CONSIDERED or not is_ahead:
+        return 0.0
+    
+    # 距离超过搜索半径：排除（防止远处不相关景点混入）
+    if distance_m > MAX_SEARCH_RADIUS_METERS:
         return 0.0
     
     # 权重 = 已介绍次数倒数 × 距离衰减
@@ -176,9 +186,10 @@ def _bearing_between_points(lat1: float, lon1: float, lat2: float, lon2: float) 
     lat1_rad = radians(lat1)
     lat2_rad = radians(lat2)
     dlon = radians(lon2 - lon1)
+    dlat = lat2_rad - lat1_rad  # North is positive
     
-    x = atan2(dlon, (lat1_rad - lat2_rad))
-    bearing = (degrees(x) + 90) % 360
+    x = atan2(dlon, dlat)  # atan2(east_component, north_component)
+    bearing = (degrees(x) + 360) % 360
     return bearing
 
 
@@ -212,11 +223,18 @@ def _create_simulated_landmark(lat: float, lon: float, speed_kmh: float):
 
 
 def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
-                               poi_location_str: str, heading_tolerance: int = 90) -> bool:
+                               poi_location_str: str, speed_kmh: float = 0.0) -> bool:
     """
-    Check if POI is in front of the car within heading_tolerance degrees.
-    heading_tolerance: acceptable angle deviation from car_heading (0-180, default 90 means ±90°)
+    Check if POI is in front of the car.
+    When speed is very low, heading is unreliable — treat all POIs as 'ahead'.
+    Otherwise use a ±60° tolerance (front 120°).
     """
+    # heading 在静止/低速时不可靠，此时不按方向过滤
+    if speed_kmh < 5.0:
+        return True
+
+    heading_tolerance = 60  # ±60°，即前方 120° 扇形
+
     poi_pos = _parse_location(poi_location_str)
     if not poi_pos:
         return False
@@ -225,7 +243,6 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
     bearing_to_poi = _bearing_between_points(car_lat, car_lon, poi_lat, poi_lon)
     angle_diff = _normalize_angle_diff(car_heading, bearing_to_poi)
     
-    # If angle difference is <= tolerance, POI is ahead
     return angle_diff <= heading_tolerance
 
 
@@ -261,8 +278,8 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
         poi_id = _normalize_poi_id(poi)
         poi_location = poi.get("location", "")
         
-        # Check if POI is in front of the car within ±90° heading tolerance
-        is_ahead = is_poi_ahead_in_direction(lat, lon, heading, poi_location, heading_tolerance=90)
+        # Check if POI is in front of the car (speed-dependent tolerance)
+        is_ahead = is_poi_ahead_in_direction(lat, lon, heading, poi_location, speed_kmh)
         
         # 计算到 POI 的方向
         poi_pos = _parse_location(poi_location)
@@ -308,8 +325,11 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
     # If filtering is too strict and returns nothing, relax the filter gradually
     if not filtered:
         if frequency_level < 20:
-            # fallback: allow introduced_count==0
-            filtered = [l for l in sorted_landmarks if l.get("introduced_count", 0) == 0 and l.get("selection_weight", 0) > 0]
+            # fallback: allow introduced_count==0 AND within search radius
+            filtered = [l for l in sorted_landmarks if l.get("introduced_count", 0) == 0 and l.get("selection_weight", 0) > 0 and l.get("distance_m", inf) <= MAX_SEARCH_RADIUS_METERS]
+        if not filtered:
+            # final fallback: all within search radius
+            filtered = [l for l in sorted_landmarks if l.get("distance_m", inf) <= MAX_SEARCH_RADIUS_METERS]
         if not filtered:
             filtered = sorted_landmarks
 

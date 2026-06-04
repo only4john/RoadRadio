@@ -5,6 +5,12 @@ import CoreLocation
 import MediaPlayer
 
 // ==========================================
+// 🌐 后端服务器地址（修改这里即可切换）
+//    真机请改为 Mac 局域网 IP 或云服务器地址
+// ==========================================
+let serverBaseURL = "http://49.51.247.112:8000"
+
+// ==========================================
 // 1. 后台大管家：双播放器架构（BGM + 人声）
 // ==========================================
 class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocationManagerDelegate {
@@ -25,6 +31,11 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @Published var temperature: Int = 0
     @Published var currentMusicName: String = "无"
     @Published var generatedAudioFilename: String = ""
+    @Published var bgmEnabled: Bool = false
+
+    // 自动播报冷却
+    private var lastAutoBroadcastTime: Date = .distantPast
+    private let autoBroadcastCooldown: TimeInterval = 90  // 两次自动播报至少间隔 90 秒
 
     // 模拟器测试覆盖值
     @Published var simulatedLatitude: Double = 30.5444
@@ -76,13 +87,16 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         setupAndPlayBGM()
         setupLocation()
         setupNowPlayingObserver()
+        // 启动时获取一次天气，之后每 30 分钟自动刷新
+        Task { await fetchWeatherIfNeeded() }
+        startWeatherTimer()
     }
 
     private func setupLocation() {
         locationManager.delegate = self
         locationManager.requestWhenInUseAuthorization()
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.distanceFilter = 10
+        locationManager.distanceFilter = 50  // 每 50 米更新一次
         if CLLocationManager.headingAvailable() {
             locationManager.headingFilter = 5
             locationManager.startUpdatingHeading()
@@ -96,34 +110,76 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     }
 
     private func setupNowPlayingObserver() {
-        let player = MPMusicPlayerController.systemMusicPlayer
-        player.beginGeneratingPlaybackNotifications()
-        NotificationCenter.default.addObserver(self, selector: #selector(nowPlayingItemChanged), name: .MPMusicPlayerControllerNowPlayingItemDidChange, object: player)
-        if let item = player.nowPlayingItem {
-            let title = item.title ?? "Apple Music"
-            DispatchQueue.main.async { self.currentMusicName = title }
+        // 延迟至 App 完全启动后再注册，避免 init 阶段触发系统音频中断
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self = self else { return }
+            let player = MPMusicPlayerController.systemMusicPlayer
+            player.beginGeneratingPlaybackNotifications()
+            NotificationCenter.default.addObserver(self, selector: #selector(self.nowPlayingItemChanged), name: .MPMusicPlayerControllerNowPlayingItemDidChange, object: player)
+            if let item = player.nowPlayingItem, let title = item.title {
+                DispatchQueue.main.async { self.currentMusicName = title }
+            }
         }
     }
 
     @objc private func nowPlayingItemChanged(notification: Notification) {
         let player = MPMusicPlayerController.systemMusicPlayer
-        if let item = player.nowPlayingItem {
-            let title = item.title ?? "Apple Music"
+        if let item = player.nowPlayingItem, let title = item.title {
             DispatchQueue.main.async { self.currentMusicName = title }
         }
     }
 
     // CLLocationManagerDelegate
+    private var didFetchInitialWeather = false
+
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last else { return }
+        let lat = loc.coordinate.latitude
+        let lon = loc.coordinate.longitude
         DispatchQueue.main.async {
-            self.latitude = loc.coordinate.latitude
-            self.longitude = loc.coordinate.longitude
+            self.latitude = lat
+            self.longitude = lon
             self.speedKmh = Int(max(0, loc.speed) * 3.6)
             // 优先使用 GPS 路径的 course 作为方向（若有效），否则保留原有 heading
             if loc.course >= 0 {
                 self.headingDeg = Int(loc.course)
             }
+        }
+        // GPS 首次定位后立刻获取天气（用 loc 原始坐标，不依赖 self.latitude 异步赋值）
+        if !didFetchInitialWeather {
+            didFetchInitialWeather = true
+            Task { await self.fetchWeather(lat: lat, lon: lon) }
+        }
+        // 自动播报：GPS 更新时检测前方 POI 是否需要自动播报
+        triggerAutoBroadcastIfNeeded()
+    }
+
+    /// 根据当前频率和 POI 权重自动决定是否触发播报
+    private func triggerAutoBroadcastIfNeeded() {
+        // 正在播放时不重复触发
+        guard !isPlaying else { return }
+        // 冷却时间内不触发
+        guard Date().timeIntervalSince(lastAutoBroadcastTime) >= autoBroadcastCooldown else { return }
+        // 速度太低（静止或步行）不自动播报，避免频繁触发
+        guard displaySpeedKmh >= 10 else { return }
+
+        let threshold: Double
+        switch broadcastFrequency {
+        case 80...100: threshold = 0.0    // 最高频率：任意前方 POI 都触发
+        case 50..<80:  threshold = 0.1
+        case 20..<50:  threshold = 0.3
+        default:       return             // 最低频率：不自动播报，仅手动
+        }
+
+        Task {
+            await fetchUpcomingLandmarks()
+            guard let poi = selectedPOI,
+                  let weight = poi["selection_weight"] as? Double,
+                  weight >= threshold else { return }
+
+            lastAutoBroadcastTime = Date()
+            print("🚗 自动播报触发！POI: \(poi["name"] ?? "?") 权重: \(weight)")
+            await generateAndPlayRadio(speed: displaySpeedKmh, music: currentMusicName)
         }
     }
 
@@ -136,17 +192,40 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     }
     
     private func setupAudioSession() {
+        // 不在 init 时触碰 AVAudioSession，避免引起 Apple Music 暂停
+        // 仅在播报前由 activateAudioSessionForVoice() 配置并激活
+        print("🎧 音频会话待机（未激活，不影响系统音乐）")
+    }
+
+    // 播报前激活音频会话并启用闪避，压低 Apple Music 等背景音频
+    private func activateAudioSessionForVoice() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default)
+            try session.setCategory(.playback, mode: .default, options: [.duckOthers])
             try session.setActive(true)
+            print("🔊 音频会话已激活（系统音乐已压低）")
         } catch {
             print("❌ 音频会话激活失败: \(error)")
+        }
+    }
+
+    // 播报结束后释放音频会话，让 Apple Music 等恢复原音量
+    private func deactivateAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            print("🎵 音频会话已释放，系统音乐应恢复")
+        } catch {
+            print("⚠️ 音频会话释放失败: \(error)")
         }
     }
     
     // 加载并循环播放本地 BGM
     private func setupAndPlayBGM() {
+        // BGM 默认关闭时不创建音频播放器，避免触发系统音频中断
+        guard bgmEnabled else {
+            print("🔇 BGM 已禁用，不初始化音频引擎")
+            return
+        }
         guard let bgmURL = Bundle.main.url(forResource: "bgm", withExtension: "mp3") else {
             print("⚠️ 找不到 bgm.mp3！请确保文件已加入项目并勾选了 Target Membership")
             return
@@ -158,24 +237,36 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             bgmPlayer?.volume = 0.5       // 初始满音量
             bgmPlayer?.prepareToPlay()
             bgmPlayer?.play()
-            // 显示 BGM 文件名为当前音乐（除非系统播放其他音乐）
             DispatchQueue.main.async { self.currentMusicName = bgmURL.lastPathComponent }
             print("🎵 BGM 启动成功！")
         } catch {
             print("❌ BGM 加载失败: \(error)")
         }
     }
-    
-    // 内部闪避：平滑压低 BGM
-    private func lowerBGMVolume() {
-        bgmPlayer?.setVolume(0.1, fadeDuration: 0.5)
-        print("🔊 BGM 已智能压低")
+
+    func toggleBGM() {
+        bgmEnabled.toggle()
+        if bgmEnabled {
+            if bgmPlayer == nil {
+                setupAndPlayBGM()
+            } else {
+                bgmPlayer?.play()
+            }
+        } else {
+            bgmPlayer?.stop()
+        }
     }
     
-    // 内部闪避：平滑恢复 BGM
+    // 内部闪避：压低 BGM 音量（Apple Music 由 .duckOthers 自动处理）
+    private func lowerBGMVolume() {
+        bgmPlayer?.setVolume(0.1, fadeDuration: 0.5)
+        print("🔊 BGM 已智能压低（Apple Music 系统自动闪避）")
+    }
+    
+    // 内部闪避：恢复 BGM 音量（Apple Music 由 .duckOthers 自动恢复）
     private func restoreBGMVolume() {
-        bgmPlayer?.setVolume(0.5, fadeDuration: 1.0)
-        print("✅ BGM 音量已恢复")
+        bgmPlayer?.setVolume(bgmEnabled ? 0.5 : 0.0, fadeDuration: 1.0)
+        print("✅ BGM 音量已恢复（Apple Music 系统自动恢复）")
     }
     
     // 监听人声播放结束
@@ -183,8 +274,8 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         if player == voicePlayer {
             DispatchQueue.main.async {
                 self.isPlaying = false
-                self.restoreBGMVolume() // 人声结束，恢复 BGM
-                // 记录本次介绍
+                self.restoreBGMVolume()
+                self.deactivateAudioSession()  // 释放音频会话，恢复系统音乐音量
                 self.recordLandmarkIntro()
             }
         }
@@ -195,10 +286,17 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         selectedPOI = nil
         await fetchUpcomingLandmarks()
 
+        // 无可用 POI 时跳过播报
+        guard let poi = selectedPOI, let _ = poi["name"] as? String else {
+            print("⏭️ 无可播报 POI，跳过")
+            DispatchQueue.main.async { self.isLoading = false }
+            return
+        }
+
         // 尝试获取天气和时间信息以丰富 payload
         await fetchWeatherIfNeeded()
 
-        guard let url = URL(string: "http://127.0.0.1:8000/generate-radio") else { return }
+        guard let url = URL(string: "\(serverBaseURL)/generate-radio") else { return }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -245,6 +343,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
                     self.generatedAudioFilename = tmpName
 
                     self.lowerBGMVolume() // 播放人声前，先压低 BGM
+                    self.activateAudioSessionForVoice() // 激活闪避，压低系统音乐
 
                     self.voicePlayer = try AVAudioPlayer(contentsOf: tmpURL)
                     self.voicePlayer?.delegate = self
@@ -265,7 +364,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     // 获取候选 POI 并选中一个（将结果保存在 selectedPOI）
     func fetchUpcomingLandmarks() async {
-        guard let url = URL(string: "http://127.0.0.1:8000/upcoming-landmarks") else { return }
+        guard let url = URL(string: "\(serverBaseURL)/upcoming-landmarks") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -308,11 +407,13 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     // Fetch weather from Open-Meteo (no API key required) and update weatherDescription & temperature
     func fetchWeatherIfNeeded() async {
-        if latitude == 0 && longitude == 0 {
-            return
-        }
+        await fetchWeather(lat: latitude, lon: longitude)
+    }
 
-        let urlStr = "https://api.open-meteo.com/v1/forecast?latitude=\(latitude)&longitude=\(longitude)&current_weather=true&timezone=auto"
+    func fetchWeather(lat: Double, lon: Double) async {
+        guard lat != 0 || lon != 0 else { return }
+
+        let urlStr = "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current_weather=true&timezone=auto"
         guard let url = URL(string: urlStr) else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -331,6 +432,13 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             }
         } catch {
             print("❌ 获取天气失败: \(error)")
+        }
+    }
+
+    // 每 30 分钟自动刷新天气
+    private func startWeatherTimer() {
+        Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
+            Task { await self?.fetchWeatherIfNeeded() }
         }
     }
 
@@ -362,7 +470,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     // 播放结束时记录介绍
     private func recordLandmarkIntro() {
         guard let poi = selectedPOI, let poi_id = poi["poi_id"] as? String, let name = poi["name"] as? String, let location = poi["location"] as? String else { return }
-        guard let url = URL(string: "http://127.0.0.1:8000/record-landmark") else { return }
+        guard let url = URL(string: "\(serverBaseURL)/record-landmark") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -409,7 +517,7 @@ struct ContentView: View {
                             .font(.headline)
                             .foregroundColor(.gray)
                         
-                        Text("creep")
+                        Text(radioManager.currentMusicName)
                             .font(.title2)
                             .fontWeight(.bold)
                             .foregroundColor(.white)
@@ -426,6 +534,18 @@ struct ContentView: View {
                             Text(radioManager.formattedTimeOfDay())
                                 .font(.caption)
                                 .foregroundColor(.white.opacity(0.85))
+                        }
+
+                        // BGM 开关
+                        Button(action: {
+                            radioManager.toggleBGM()
+                        }) {
+                            Label(
+                                radioManager.bgmEnabled ? "BGM 开" : "BGM 关",
+                                systemImage: radioManager.bgmEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill"
+                            )
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.8))
                         }
 
                         // 小字显示经纬度与当前音乐信息

@@ -145,7 +145,7 @@ struct GPSData {
 // MARK: - HTTP 客户端示例
 
 class RadioAPIClient {
-    let baseURL = "http://127.0.0.1:8000"  // 后端服务地址
+    let baseURL = serverBaseURL  // 后端服务地址，定义在 ContentView.swift
     
     /// 查询前方景点
     func queryUpcomingLandmarks(
