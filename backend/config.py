@@ -1,17 +1,24 @@
 """
 API 配置和密钥管理
-注意：不要将此文件提交到公开的 GitHub 仓库
+支持 .env 环境变量，优先级：环境变量 > 硬编码默认值
 """
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ==========================================
 # 🔑 API 密钥配置
 # ==========================================
-DEEPSEEK_API_KEY = "sk-a3664d2ba5864986b65efffc59503bef"
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
-DEEPSEEK_REQUEST_TIMEOUT = 30.0
+AMAP_API_KEY = os.getenv("AMAP_API_KEY", "1bf4810688b1f136dd5e5d16ea67b587")
 
-MINIMAX_API_KEY = "sk-cp-9Xyei5hLBF7dh3dHKZZA1p-YKOYWCHV2NVzns3-_9Frjwx4XGrkdr8wuSXrZtEQCtQBAWR-PcKNJL8_s6hH4rphP2lSS53z08m4p7_wiDSQGmx5YeI95FWM"
-MINIMAX_WS_URL = "wss://api.minimax.chat/ws/v1/t2a_v2?GroupId=2025485655798195032"
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-a3664d2ba5864986b65efffc59503bef")
+DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
+DEEPSEEK_REQUEST_TIMEOUT = float(os.getenv("DEEPSEEK_TIMEOUT", "30.0"))
+
+MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "sk-cp-9Xyei5hLBF7dh3dHKZZA1p-YKOYWCHV2NVzns3-_9Frjwx4XGrkdr8wuSXrZtEQCtQBAWR-PcKNJL8_s6hH4rphP2lSS53z08m4p7_wiDSQGmx5YeI95FWM")
+MINIMAX_WS_URL = os.getenv("MINIMAX_WS_URL", "wss://api.minimax.chat/ws/v1/t2a_v2?GroupId=2025485655798195032")
 
 # ==========================================
 # 🎙️ 语音合成配置
