@@ -14,7 +14,9 @@ class RealTimeLocationPayload(BaseModel):
     poi_name: str = ""        
     weather: str = ""         
     temperature: int = 0      
-    time_of_day: str = ""     
+    time_of_day: str = ""
+    artist: str = ""          # 当前播放音乐的歌手/艺术家
+    month: str = ""           # 当前月份，如 "6月"     
 
 
 class LandmarkIntroRecordPayload(BaseModel):

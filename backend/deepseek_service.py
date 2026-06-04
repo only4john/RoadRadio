@@ -10,7 +10,7 @@ from config import (
     DEEPSEEK_API_URL,
     DEEPSEEK_REQUEST_TIMEOUT,
     DEEPSEEK_SYSTEM_PROMPT,
-    DEEPSEEK_USER_PROMPT_TEMPLATE,
+    build_radio_prompt,
 )
 
 
@@ -29,15 +29,8 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
     """
     print("🧠 正在呼叫 DeepSeek 编写剧本...")
     
-    # 生成用户提示词
-    user_prompt = DEEPSEEK_USER_PROMPT_TEMPLATE.format(
-        time_of_day=payload.time_of_day,
-        weather=payload.weather,
-        temperature=payload.temperature,
-        speed_kmh=payload.speed_kmh,
-        poi_name=payload.poi_name,
-        current_music=payload.current_music,
-    )
+    # 动态生成用户提示词（随机选取元素、风格、气氛、内容方向）
+    user_prompt = build_radio_prompt(payload)
     
     # 构建请求
     request_body = {

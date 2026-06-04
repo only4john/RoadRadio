@@ -30,6 +30,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @Published var weatherDescription: String = ""
     @Published var temperature: Int = 0
     @Published var currentMusicName: String = "无"
+    @Published var currentArtist: String = ""
     @Published var generatedAudioFilename: String = ""
     @Published var bgmEnabled: Bool = false
 
@@ -117,7 +118,10 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             player.beginGeneratingPlaybackNotifications()
             NotificationCenter.default.addObserver(self, selector: #selector(self.nowPlayingItemChanged), name: .MPMusicPlayerControllerNowPlayingItemDidChange, object: player)
             if let item = player.nowPlayingItem, let title = item.title {
-                DispatchQueue.main.async { self.currentMusicName = title }
+                DispatchQueue.main.async {
+                    self.currentMusicName = title
+                    self.currentArtist = item.artist ?? ""
+                }
             }
         }
     }
@@ -125,7 +129,10 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @objc private func nowPlayingItemChanged(notification: Notification) {
         let player = MPMusicPlayerController.systemMusicPlayer
         if let item = player.nowPlayingItem, let title = item.title {
-            DispatchQueue.main.async { self.currentMusicName = title }
+            DispatchQueue.main.async {
+                self.currentMusicName = title
+                self.currentArtist = item.artist ?? ""
+            }
         }
     }
 
@@ -314,11 +321,13 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
                     "heading": self.displayHeadingDeg,
                     "familiarity_level": 1,
                     "current_music": music,
+                    "artist": currentArtist,
                     "poi_name": poiName,
                     "frequency_level": broadcastFrequency,
                     "weather": weatherDescription,
                     "temperature": temperature,
-                    "time_of_day": formattedTimeOfDay()
+                    "time_of_day": formattedTimeOfDay(),
+                    "month": formattedMonth()
                 ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         
@@ -465,6 +474,11 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         case 18..<24: return "晚上\(hour - 12)点"
         default: return "凌晨\(hour)点"
         }
+    }
+
+    func formattedMonth() -> String {
+        let m = Calendar.current.component(.month, from: Date())
+        return "\(m)月"
     }
 
     // 播放结束时记录介绍

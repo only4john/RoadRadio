@@ -13,6 +13,18 @@ MIN_SEARCH_RADIUS_METERS = 100
 MAX_SEARCH_RADIUS_METERS = 2000
 PREVIEW_LEAD_MINUTES = 2
 MIN_DISTANCE_CONSIDERED = 150
+
+# 高德 POI 分类码 → 类型权重（0~1，越高越值得播报）
+# typecode 前6位为大类，中间6位为中类，后6位为小类
+POI_TYPE_WEIGHTS = {
+    "110000": 1.0,   # 风景名胜（国家级景区、世界遗产等）
+    "140000": 1.0,   # 科教文化（博物馆、纪念馆、展览馆）
+    "080000": 0.9,   # 文化场馆（图书馆、美术馆、文化宫）
+    "100000": 0.8,   # 文物古迹（寺庙、古塔、教堂）
+    "060000": 0.3,   # 购物（商场、商业街）
+    "050000": 0.2,   # 餐饮美食
+}
+DEFAULT_POI_TYPE_WEIGHT = 0.5  # 未匹配分类的默认权重
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", os.path.join(os.path.dirname(__file__), "landmark_history.db"))
 
 
@@ -140,7 +152,15 @@ def compute_preview_start_seconds(distance_m: int, speed_kmh: float) -> int:
     return max(0, int(arrival_sec - PREVIEW_LEAD_MINUTES * 60))
 
 
-def compute_selection_weight(introduced_count: int, distance_m: int, is_ahead: bool = True) -> float:
+def _get_type_weight(typecode: str) -> float:
+    """根据高德 typecode 返回类型权重"""
+    for prefix, weight in POI_TYPE_WEIGHTS.items():
+        if typecode.startswith(prefix):
+            return weight
+    return DEFAULT_POI_TYPE_WEIGHT
+
+
+def compute_selection_weight(introduced_count: int, distance_m: int, is_ahead: bool = True, typecode: str = "") -> float:
     # 介绍次数 >= 5 次：直接排除
     if introduced_count >= 5:
         return 0.0
@@ -153,12 +173,13 @@ def compute_selection_weight(introduced_count: int, distance_m: int, is_ahead: b
     if distance_m > MAX_SEARCH_RADIUS_METERS:
         return 0.0
     
-    # 权重 = 已介绍次数倒数 × 距离衰减
+    # 权重 = 类型权重 × 熟悉度 × 距离衰减
     # 未介绍过时权重最高，介绍过1-4次时权重递减
+    type_weight = _get_type_weight(typecode)
     frequency_weight = 1.0 / (1.0 + introduced_count * 0.5)
     proximity_weight = max(0.2, 1.0 - min(distance_m, MAX_SEARCH_RADIUS_METERS) / MAX_SEARCH_RADIUS_METERS)
     
-    return frequency_weight * proximity_weight
+    return type_weight * frequency_weight * proximity_weight
 
 
 def _normalize_poi_id(poi):
@@ -292,6 +313,7 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
             angle_diff = 180
         
         history = _get_history_record(poi_id) or {}
+        typecode = poi.get("typecode", "")
 
         landmarks.append(LandmarkInfo(
             poi_id=poi_id,
@@ -303,7 +325,7 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
             estimated_arrival_min=round(estimated_arrival_min, 1),
             preview_start_seconds=preview_seconds,
             introduced_count=history.get("introduced_count", 0),
-            selection_weight=compute_selection_weight(history.get("introduced_count", 0), distance, is_ahead)
+            selection_weight=compute_selection_weight(history.get("introduced_count", 0), distance, is_ahead, typecode)
         ).dict())
         
         print(f"  📍 {poi.get('name', '?')} | 距离 {distance}m | 方向 {bearing_to_poi:.0f}° (车头 {heading}° | 差异 {angle_diff:.0f}°) | 前方: {is_ahead} | 权重: {landmarks[-1]['selection_weight']:.3f}")

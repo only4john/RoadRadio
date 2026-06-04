@@ -27,13 +27,13 @@ VOICE_SETTINGS = {
     "A": {
         "voice_id": "male-qn-qingse",
         "speed": 1,
-        "vol": 2,
+        "vol": 5,
         "pitch": 0
     },
     "B": {
         "voice_id": "female-chengshu",
         "speed": 1,
-        "vol": 2,
+        "vol": 5,
         "pitch": 0
     }
 }
@@ -47,8 +47,93 @@ AUDIO_SETTINGS = {
 # ==========================================
 # 🎭 DeepSeek 剧本配置
 # ==========================================
-DEEPSEEK_SYSTEM_PROMPT = "你是一个王牌车载电台的编剧，只输出 JSON 格式的代码，不要输出任何多余的解释。A是清爽男声，B是成熟女声。"
+DEEPSEEK_SYSTEM_PROMPT = "你是一个王牌车载电台的编剧，A是清爽男声，B是成熟女声。只输出严格 JSON 格式的代码，不要输出任何多余解释。"
 
+STYLE_POOL = [
+    ("两人像老朋友一样轻松聊天，相互应和", "语气舒缓放松，像午后电台"),
+    ("两人像损友一样互相抬杠调侃，但氛围友好", "语气开心活泼，充满能量"),
+    ("一个正经介绍、一个插科打诨逗哏", "语气温暖治愈，像深夜电台"),
+    ("两人一起感叹和共鸣", "语气充满好奇和探索感"),
+]
+
+CONTENT_HINTS = [
+    "可以聊聊这个地标的历史小故事或典故",
+    "可以顺便说说这个地标的现状和游览体验",
+    "可以从文化衍生的角度聊聊这里的独特之处",
+    "分享一个跟这个地标相关的轶事或八卦",
+    "说一个关于这里的冷知识或有趣的细节",
+]
+
+
+def build_radio_prompt(payload) -> str:
+    """动态构建电台播报 prompt，随机选取信息元素、对话风格和内容方向"""
+    import random
+
+    # ─── 1. 信息元素池 ───
+    elements = []
+    if payload.time_of_day:
+        elements.append(f"当前时间：{payload.time_of_day}")
+    if payload.weather or payload.temperature:
+        parts = []
+        if payload.weather:
+            parts.append(f"天气{payload.weather}")
+        if payload.temperature:
+            parts.append(f"气温{payload.temperature}度")
+        elements.append("，".join(parts))
+    if payload.month:
+        elements.append(f"正值{payload.month}")
+    if payload.speed_kmh > 0:
+        elements.append(f"正以{payload.speed_kmh} km/h 的车速行驶")
+    if payload.current_music and payload.current_music != "无":
+        music_str = f"车内正在播放《{payload.current_music}》"
+        if payload.artist:
+            music_str += f"（{payload.artist}）"
+        elements.append(music_str)
+
+    # ─── 2. 随机选几个额外元素 ───
+    roll = random.random()
+    if roll < 0.25:
+        num_extras = 0
+    elif roll < 0.75:
+        num_extras = 1
+    elif roll < 0.95:
+        num_extras = 2
+    else:
+        num_extras = min(3, len(elements))
+
+    selected = random.sample(elements, min(num_extras, len(elements)))
+
+    # ─── 3. 随机风格 + 气氛 + 内容方向 ───
+    style, atmosphere = random.choice(STYLE_POOL)
+    hint = random.choice(CONTENT_HINTS)
+
+    # ─── 4. 音乐评论提示（小概率） ───
+    music_comment = ""
+    music_selected = any("播放" in e for e in selected)
+    if music_selected and random.random() < 0.3:
+        music_comment = ("如果提到了音乐，可以顺便简单评论一下这位歌手/艺术家的风格或近况，"
+                         "自然地一带而过，不用太长。")
+
+    # ─── 5. 拼接 prompt ───
+    info_block = "\n".join(f"- {e}" for e in selected) if selected else "（仅关注前方地标）"
+
+    return f"""前方即将经过或处于【{payload.poi_name}】。
+
+当前环境信息：
+{info_block}
+
+对话风格：{style}
+整体气氛：{atmosphere}
+内容提示：{hint}
+{music_comment}
+请生成 2到3 轮自然、有沉浸感的电台双人对话。要求：
+1. 必须围绕【{payload.poi_name}】展开，这是最核心的话题。
+2. 如果提供了环境信息，自然地融入对话中，不要生硬堆砌每一行。
+3. 像公路旅行中的朋友聊天，轻松不做作，不要像导游词。
+4. 返回强制严格 JSON 格式：{{"dialogue": [{{"role": "A", "text": "内容"}}, {{"role": "B", "text": "内容"}}]}}"""
+
+
+# 旧模板保留兼容（不再使用，由 build_radio_prompt 替代）
 DEEPSEEK_USER_PROMPT_TEMPLATE = """
 当前时间是{time_of_day}，天气{weather}，气温{temperature}度。
 我们正以 {speed_kmh} km/h 的车速行驶，前方即将经过或处于【{poi_name}】。
