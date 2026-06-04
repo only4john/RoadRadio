@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from config import AMAP_API_KEY
 
 AMAP_PLACE_AROUND_URL = "https://restapi.amap.com/v3/place/around"
-AMAP_SEARCH_KEYWORDS = "历史建筑|景点|博物馆|学校"
+AMAP_SEARCH_KEYWORDS = "历史建筑|文化地标|旅游景点|博物馆|纪念馆|公园"
 MIN_SEARCH_RADIUS_METERS = 100
 MAX_SEARCH_RADIUS_METERS = 2000
 PREVIEW_LEAD_MINUTES = 2
