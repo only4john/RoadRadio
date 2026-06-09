@@ -48,6 +48,9 @@ class LandmarkInfo(BaseModel):
     preview_start_seconds: int
     introduced_count: int = 0
     selection_weight: float = 0.0
+    province: str = ""   # 省
+    city: str = ""       # 市
+    district: str = ""   # 区/县
 
 
 class LandmarkRecordPayload(BaseModel):

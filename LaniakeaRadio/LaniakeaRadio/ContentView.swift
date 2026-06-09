@@ -289,9 +289,10 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     }
     
     func generateAndPlayRadio(speed: Int, music: String) async {
-        // 在生成前，总是刷新一次候选 POI，确保方向/速度修改后生效
-        selectedPOI = nil
-        await fetchUpcomingLandmarks()
+        // 如果还没获取过 POI，先获取一次（手动点击按钮时走这里）
+        if selectedPOI == nil {
+            await fetchUpcomingLandmarks()
+        }
 
         // 无可用 POI 时跳过播报
         guard let poi = selectedPOI, let _ = poi["name"] as? String else {

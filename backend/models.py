@@ -16,7 +16,10 @@ class RealTimeLocationPayload(BaseModel):
     temperature: int = 0      
     time_of_day: str = ""
     artist: str = ""          # 当前播放音乐的歌手/艺术家
-    month: str = ""           # 当前月份，如 "6月"     
+    month: str = ""           # 当前月份，如 "6月"
+    province: str = ""        # POI 所在省
+    city: str = ""            # POI 所在市
+    district: str = ""        # POI 所在区/县     
 
 
 class LandmarkIntroRecordPayload(BaseModel):

@@ -6,9 +6,8 @@ from amap_landmarks import (
     LandmarkSearchPayload,
     get_upcoming_landmarks,
     record_landmark_introduction,
-    select_landmark_for_session,
 )
-from deepseek_service import generate_radio_script
+from deepseek_service import generate_radio_script, select_best_landmark
 from minimax_service import synthesize_audio
 
 app = FastAPI(title="车载情感电台后端系统")

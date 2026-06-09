@@ -83,3 +83,68 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
         except Exception as e:
             print(f"❌ DeepSeek 请求失败: {e}")
             raise
+
+
+async def select_best_landmark(candidates: list) -> dict:
+    """用 DeepSeek 从候选 POI 中选出最有趣的一个"""
+    print("🤔 正在咨询 DeepSeek 哪个 POI 最值得播报...")
+
+    # 构建候选列表（含地名全称）
+    candidate_lines = []
+    for i, c in enumerate(candidates):
+        full_name = c.get("name", "?")
+        addr_parts = []
+        for key in ("province", "city", "district"):
+            v = c.get(key, "")
+            if v:
+                addr_parts.append(v)
+        if addr_parts:
+            full_name = "".join(addr_parts) + " " + full_name
+        details = f"{full_name}（{c.get('type', '未知')}, 距离{c.get('distance_m', '?')}m, 已播{c.get('introduced_count', 0)}次）"
+        candidate_lines.append(f"{i+1}. {details}")
+
+    prompt = f"""以下是从高德地图获取的前方 POI 候选列表：
+
+{chr(10).join(candidate_lines)}
+
+请从中选择最适合做车载电台播报的一个 POI。评判标准：
+- 历史文化丰富度
+- 知名度和趣味性
+- 是否有故事可讲
+- 距离适中（太远的不优先）
+
+只返回严格 JSON：{{"index": 数字, "name": "POI名称", "reason": "一句话理由"}}"""
+
+    request_body = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "你是一个旅行家，擅长挑选最有故事的地标。只输出 JSON。"},
+            {"role": "user", "content": prompt}
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.7,
+    }
+
+    request_bytes = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
+
+    async with httpx.AsyncClient(timeout=DEEPSEEK_REQUEST_TIMEOUT) as client:
+        resp = await client.post(
+            DEEPSEEK_API_URL,
+            headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
+            content=request_bytes,
+        )
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            cleaned = re.sub(r"[\x00-\x1f]", " ", content)
+            data = json.loads(cleaned)
+
+    idx = data.get("index", 1) - 1
+    if 0 <= idx < len(candidates):
+        chosen = candidates[idx]
+        print(f"✅ DeepSeek 选中: {data.get('name')} — {data.get('reason')}")
+        return chosen
+    print(f"⚠️ DeepSeek 返回无效索引，回退到第一个候选")
+    return candidates[0]
