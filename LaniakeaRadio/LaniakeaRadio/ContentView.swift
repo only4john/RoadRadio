@@ -33,6 +33,8 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @Published var currentArtist: String = ""
     @Published var generatedAudioFilename: String = ""
     @Published var bgmEnabled: Bool = false
+    @Published var candidatePOIs: [[String: Any]] = []
+    @Published var deepseekReason: String = ""   // DeepSeek 选择理由
 
     // 自动播报冷却
     private var lastAutoBroadcastTime: Date = .distantPast
@@ -259,8 +261,21 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             } else {
                 bgmPlayer?.play()
             }
+            // BGM 需要激活音频会话（不闪避系统音乐）
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                print("⚠️ BGM 音频会话激活失败: \(error)")
+            }
         } else {
             bgmPlayer?.stop()
+            // 关闭 BGM 时释放音频会话
+            do {
+                try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            } catch {
+                print("⚠️ BGM 音频会话释放失败: \(error)")
+            }
         }
     }
     
@@ -324,6 +339,9 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
                     "current_music": music,
                     "artist": currentArtist,
                     "poi_name": poiName,
+                    "province": selectedPOI?["province"] as? String ?? "",
+                    "city": selectedPOI?["city"] as? String ?? "",
+                    "district": selectedPOI?["district"] as? String ?? "",
                     "frequency_level": broadcastFrequency,
                     "weather": weatherDescription,
                     "temperature": temperature,
@@ -393,21 +411,25 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return }
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            
+            // 保存候选列表
+            let candidates = json?["candidates"] as? [[String: Any]] ?? []
+            DispatchQueue.main.async { self.candidatePOIs = candidates }
+            
             if let selected = json?["selected_landmark"] as? [String: Any] {
                 self.selectedPOI = selected
-                if let name = selected["name"] as? String {
-                    DispatchQueue.main.async {
-                        self.currentScript = "准备播报：\(name)"
-                        self.selectedPOIName = name
-                    }
+                let name = selected["name"] as? String ?? "?"
+                DispatchQueue.main.async {
+                    self.currentScript = "准备播报：\(name)"
+                    self.selectedPOIName = name
+                    self.deepseekReason = selected["_selection_reason"] as? String ?? ""
                 }
-            } else if let candidates = json?["candidates"] as? [[String: Any]], let first = candidates.first {
+            } else if let first = candidates.first {
                 self.selectedPOI = first
-                if let name = first["name"] as? String {
-                    DispatchQueue.main.async {
-                        self.currentScript = "准备播报：\(name)"
-                        self.selectedPOIName = name
-                    }
+                let name = first["name"] as? String ?? "?"
+                DispatchQueue.main.async {
+                    self.currentScript = "准备播报：\(name)"
+                    self.selectedPOIName = name
                 }
             }
         } catch {
@@ -612,6 +634,32 @@ struct ContentView: View {
                             Text("目标：\(radioManager.selectedPOIName)")
                                 .font(.subheadline)
                                 .foregroundColor(.white.opacity(0.9))
+                            if !radioManager.deepseekReason.isEmpty {
+                                Text("理由：\(radioManager.deepseekReason)")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+                        }
+
+                        // 候选 POI 列表
+                        if !radioManager.candidatePOIs.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("前方候选：")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.6))
+                                ForEach(radioManager.candidatePOIs.indices, id: \.self) { idx in
+                                    let poi = radioManager.candidatePOIs[idx]
+                                    let name = poi["name"] as? String ?? "?"
+                                    let dist = poi["distance_m"] as? Int ?? 0
+                                    let type = poi["type"] as? String ?? ""
+                                    let weight = poi["selection_weight"] as? Double ?? 0
+                                    let isSelected = (poi["name"] as? String) == radioManager.selectedPOIName
+                                    Text("\(name) · \(dist)m · \(type) · 权重\(String(format: "%.2f", weight))")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(isSelected ? .yellow : .white.opacity(0.55))
+                                }
+                            }
+                            .padding(.horizontal, 8)
                         }
                     }
                 }

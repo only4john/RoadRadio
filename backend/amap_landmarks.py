@@ -328,7 +328,10 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
             estimated_arrival_min=round(estimated_arrival_min, 1),
             preview_start_seconds=preview_seconds,
             introduced_count=history.get("introduced_count", 0),
-            selection_weight=compute_selection_weight(history.get("introduced_count", 0), distance, is_ahead, typecode)
+            selection_weight=compute_selection_weight(history.get("introduced_count", 0), distance, is_ahead, typecode),
+            province=poi.get("pname", ""),
+            city=poi.get("cityname", ""),
+            district=poi.get("adname", ""),
         ).dict())
         
         print(f"  📍 {poi.get('name', '?')} | 距离 {distance}m | 方向 {bearing_to_poi:.0f}° (车头 {heading}° | 差异 {angle_diff:.0f}°) | 前方: {is_ahead} | 权重: {landmarks[-1]['selection_weight']:.3f}")

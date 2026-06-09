@@ -28,10 +28,15 @@ async def upcoming_landmarks(payload: LandmarkSearchPayload):
             max_results=payload.max_results,
             frequency_level=getattr(payload, 'frequency_level', 50),
         )
-        selected = select_landmark_for_session(landmarks)
-        if selected:
-            print(f"[✅ 选中POI] {selected.get('name', '未知')} (id={selected.get('poi_id', 'unknown')})")
-        else:
+        selected = None
+        if landmarks:
+            try:
+                selected = await select_best_landmark(landmarks)
+                print(f"[✅ DeepSeek选中POI] {selected.get('name', '未知')} (id={selected.get('poi_id', 'unknown')})")
+            except Exception as e:
+                print(f"[⚠️  DeepSeek选POI失败，回退随机] {e}")
+                selected = landmarks[0]
+        if not selected:
             print(f"[⚠️  无可用POI] 未找到满足条件的地标，候选数：{len(landmarks)}")
     except Exception as e:
         print(f"❌ 高德地标查询失败: {e}")
