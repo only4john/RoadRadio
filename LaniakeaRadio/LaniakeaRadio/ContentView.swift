@@ -23,7 +23,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @Published var longitude: Double = 0
     @Published var speedKmh: Int = 0
     @Published var headingDeg: Int = 0
-    private var smoothedHeading: Double = 0  // 平滑后的方向，减少抖动
+    private var smoothedHeading: Double = 0
     private var headingInitialized = false
     @Published var isLoading: Bool = false
     @Published var selectedPOIName: String = ""
@@ -151,15 +151,20 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             self.latitude = lat
             self.longitude = lon
             self.speedKmh = Int(max(0, loc.speed) * 3.6)
-            // 📐 指数移动平均平滑 GPS 方向（α=0.3，越新数据权重越大，但不会跳变）
+            // 📐 指数移动平均平滑，正确处理 0°/360° 边界
             if loc.course >= 0 {
-                let rawHeading = loc.course
+                let raw = loc.course
                 if !self.headingInitialized {
-                    self.smoothedHeading = rawHeading
+                    self.smoothedHeading = raw
                     self.headingInitialized = true
                 } else {
-                    let alpha = 0.3  // 平滑系数：0~1，越小越平滑（0.3 = 新数据占30%）
-                    self.smoothedHeading = alpha * rawHeading + (1 - alpha) * self.smoothedHeading
+                    // 处理角度环绕：如果差值>180°，走"短路径"
+                    var diff = raw - self.smoothedHeading
+                    while diff > 180 { diff -= 360 }
+                    while diff < -180 { diff += 360 }
+                    self.smoothedHeading = (self.smoothedHeading + 0.3 * diff)
+                        .truncatingRemainder(dividingBy: 360)
+                    if self.smoothedHeading < 0 { self.smoothedHeading += 360 }
                 }
                 self.headingDeg = Int(self.smoothedHeading)
             }
