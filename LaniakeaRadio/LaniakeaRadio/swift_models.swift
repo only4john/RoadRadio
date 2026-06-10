@@ -44,33 +44,63 @@ struct RealTimeLocationPayload: Codable {
     }
 }
 
-/// 地标查询请求 - 用于 POST /upcoming-landmarks
+/// 地标查询请求 - 用于 POST /upcoming-landmarks（只查高德，不带历史）
 struct LandmarkSearchPayload: Codable {
     let lat: Double           // 纬度
     let lon: Double           // 经度
     let speed_kmh: Float      // 当前车速
     let heading: Int          // 当前方向 (0-360°)
     let max_results: Int      // 最多返回多少个候选 (默认5)
-    let frequency_level: Int  // 播报频率 0-100
-    let known_history: [String: Int]  // 客户端本地 POI 历史 {poi_id: count}
     
     init(
         lat: Double,
         lon: Double,
         speed_kmh: Float,
         heading: Int,
-        max_results: Int = 5,
-        frequency_level: Int = 50,
-        known_history: [String: Int] = [:]
+        max_results: Int = 5
     ) {
         self.lat = lat
         self.lon = lon
         self.speed_kmh = speed_kmh
         self.heading = heading
         self.max_results = max_results
-        self.frequency_level = frequency_level
-        self.known_history = known_history
     }
+}
+
+// MARK: - 高德原始 POI（/upcoming-landmarks 返回）
+
+struct RawPOICandidate: Codable {
+    let poi_id: String
+    let name: String
+    let type: String
+    let typecode: String
+    let address: String
+    let distance_m: Int
+    let location: String
+    let rating: Double
+    let province: String
+    let city: String
+    let district: String
+}
+
+struct UpcomingLandmarksResponse: Codable {
+    let candidates: [RawPOICandidate]
+}
+
+// MARK: - DeepSeek 选 POI（/select-best-landmark）
+
+struct SelectBestLandmarkPayload: Codable {
+    let candidates: [RawPOICandidate]
+    let user_context: [String: String]  // 可选上下文
+    
+    init(candidates: [RawPOICandidate], user_context: [String: String] = [:]) {
+        self.candidates = candidates
+        self.user_context = user_context
+    }
+}
+
+struct SelectBestLandmarkResponse: Codable {
+    let selected_landmark: RawPOICandidate?
 }
 
 /// 地标介绍记录 - 用于 POST /record-landmark

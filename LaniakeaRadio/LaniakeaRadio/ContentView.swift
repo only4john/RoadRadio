@@ -397,9 +397,9 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         }
     }
 
-    // 获取候选 POI 并选中一个（将结果保存在 selectedPOI）
-    func fetchUpcomingLandmarks() async {
-        guard let url = URL(string: "\(serverBaseURL)/upcoming-landmarks") else { return }
+    // ─── 第一步：查高德 POI ─────────────────────────────────
+    func fetchUpcomingLandmarks() async -> [RawPOICandidate] {
+        guard let url = URL(string: "\(serverBaseURL)/upcoming-landmarks") else { return [] }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -409,39 +409,90 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             "lon": displayLongitude,
             "speed_kmh": displaySpeedKmh,
             "heading": displayHeadingDeg,
-            "max_results": 5,
-            "frequency_level": broadcastFrequency,
-            "known_history": LandmarkHistoryManager.shared.allHistory()
+            "max_results": 10
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return }
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            
-            // 保存候选列表
-            let candidates = json?["candidates"] as? [[String: Any]] ?? []
-            DispatchQueue.main.async { self.candidatePOIs = candidates }
-            
-            if let selected = json?["selected_landmark"] as? [String: Any] {
-                self.selectedPOI = selected
-                let name = selected["name"] as? String ?? "?"
-                DispatchQueue.main.async {
-                    self.currentScript = "准备播报：\(name)"
-                    self.selectedPOIName = name
-                    self.deepseekReason = selected["_selection_reason"] as? String ?? ""
-                }
-            } else if let first = candidates.first {
-                self.selectedPOI = first
-                let name = first["name"] as? String ?? "?"
-                DispatchQueue.main.async {
-                    self.currentScript = "准备播报：\(name)"
-                    self.selectedPOIName = name
-                }
-            }
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return [] }
+            let decoded = try JSONDecoder().decode(UpcomingLandmarksResponse.self, from: data)
+            return decoded.candidates
         } catch {
             print("❌ 获取候选 POI 失败: \(error)")
+            return []
+        }
+    }
+    
+    // ─── 第二步：iOS 本地过滤（≥5次排除）──────────────────
+    func filterByLocalHistory(_ candidates: [RawPOICandidate]) -> [RawPOICandidate] {
+        let history = LandmarkHistoryManager.shared.allHistory()
+        return candidates.filter { (history[$0.poi_id] ?? 0) < 5 }
+    }
+    
+    // ─── 第三步：DeepSeek 选最佳 ──────────────────────────
+    func selectBestLandmark(from filtered: [RawPOICandidate]) async -> RawPOICandidate? {
+        guard !filtered.isEmpty else { return nil }
+        
+        // 如果只剩一个，直接返回
+        if filtered.count == 1 { return filtered[0] }
+        
+        guard let url = URL(string: "\(serverBaseURL)/select-best-landmark") else { return filtered.first }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let payload = SelectBestLandmarkPayload(candidates: filtered)
+        request.httpBody = try? JSONEncoder().encode(payload)
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return filtered.first }
+            let decoded = try JSONDecoder().decode(SelectBestLandmarkResponse.self, from: data)
+            if let selected = decoded.selected_landmark {
+                print("[✅ DeepSeek选中] \(selected.name)")
+                return selected
+            }
+        } catch {
+            print("[⚠️ DeepSeek选POI失败] \(error)")
+        }
+        return filtered.first
+    }
+    
+    // ─── 综合流程：查 → 过滤 → 选 ─────────────────────────
+    func fetchAndSelectPOI() async {
+        let candidates = await fetchUpcomingLandmarks()
+        let filtered = filterByLocalHistory(candidates)
+        
+        DispatchQueue.main.async {
+            self.candidatePOIs = candidates.map { poi in
+                ["name": poi.name, "distance_m": poi.distance_m,
+                 "type": poi.type, "poi_id": poi.poi_id,
+                 "location": poi.location, "province": poi.province,
+                 "city": poi.city, "district": poi.district,
+                 "address": poi.address]
+            }
+        }
+        
+        guard let best = await selectBestLandmark(from: filtered) else {
+            print("[⚠️ 无可用POI] 候选\(candidates.count)个，过滤后0个")
+            return
+        }
+        
+        self.selectedPOI = [
+            "poi_id": best.poi_id,
+            "name": best.name,
+            "type": best.type,
+            "address": best.address,
+            "location": best.location,
+            "distance_m": best.distance_m,
+            "province": best.province,
+            "city": best.city,
+            "district": best.district
+        ]
+        DispatchQueue.main.async {
+            self.currentScript = "准备播报：\(best.name)"
+            self.selectedPOIName = best.name
         }
     }
 

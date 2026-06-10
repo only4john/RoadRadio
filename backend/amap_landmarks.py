@@ -6,22 +6,7 @@ from config import AMAP_API_KEY
 
 AMAP_PLACE_AROUND_URL = "https://restapi.amap.com/v3/place/around"
 AMAP_SEARCH_KEYWORDS = "历史建筑|文化地标|旅游景点|博物馆|纪念馆|公园"
-MIN_SEARCH_RADIUS_METERS = 100
 MAX_SEARCH_RADIUS_METERS = 2000
-PREVIEW_LEAD_MINUTES = 2
-MIN_DISTANCE_CONSIDERED = 150
-
-# 高德 POI 分类码 → 类型权重（0~1，越高越值得播报）
-# typecode 前6位为大类，中间6位为中类，后6位为小类
-POI_TYPE_WEIGHTS = {
-    "110000": 1.0,   # 风景名胜（国家级景区、世界遗产等）
-    "140000": 1.0,   # 科教文化（博物馆、纪念馆、展览馆）
-    "080000": 0.9,   # 文化场馆（图书馆、美术馆、文化宫）
-    "100000": 0.8,   # 文物古迹（寺庙、古塔、教堂）
-    "060000": 0.3,   # 购物（商场、商业街）
-    "050000": 0.2,   # 餐饮美食
-}
-DEFAULT_POI_TYPE_WEIGHT = 0.5  # 未匹配分类的默认权重
 
 
 def normalize_search_radius(speed_kmh: float) -> int:
@@ -168,10 +153,8 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
     return angle_diff <= heading_tolerance
 
 
-async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, heading: int = 0, max_results: int = 5, frequency_level: int = 50, known_history: dict = None):
-    """查询前方 POI，支持客户端传入本地历史 known_history = {poi_id: introduced_count}"""
-    if known_history is None:
-        known_history = {}
+async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, heading: int = 0, max_results: int = 5):
+    """查询前方 POI（仅查高德 API，不做任何过滤，不过滤历史）"""
     radius = normalize_search_radius(speed_kmh)
     params = {
         "key": AMAP_API_KEY,
@@ -198,104 +181,31 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
     landmarks = []
     for poi in pois:
         distance = int(poi.get("distance", 0))
-        estimated_arrival_min = compute_estimated_arrival_min(distance, speed_kmh)
-        preview_seconds = compute_preview_start_seconds(distance, speed_kmh)
         poi_id = _normalize_poi_id(poi)
         poi_location = poi.get("location", "")
-        
-        # Check if POI is in front of the car (speed-dependent tolerance)
-        is_ahead = is_poi_ahead_in_direction(lat, lon, heading, poi_location, speed_kmh)
-        
-        # 计算到 POI 的方向
-        poi_pos = _parse_location(poi_location)
-        if poi_pos:
-            poi_lon, poi_lat = poi_pos
-            bearing_to_poi = _bearing_between_points(lat, lon, poi_lat, poi_lon)
-            angle_diff = _normalize_angle_diff(heading, bearing_to_poi)
-        else:
-            bearing_to_poi = -1
-            angle_diff = 180
-        
-        # 使用客户端传入的本地历史
-        introduced_count = known_history.get(poi_id, 0)
-        typecode = poi.get("typecode", "")
 
-        # 提取高德评分（biz_ext.rating），作为 popularity_weight
+        # 提取高德评分
         biz_ext = poi.get("biz_ext", {}) or {}
         rating_str = biz_ext.get("rating", "")
         try:
             rating = float(rating_str) if rating_str else 0.0
         except (ValueError, TypeError):
             rating = 0.0
-        if rating >= 4.5:
-            popularity_weight = 1.0
-        elif rating >= 4.0:
-            popularity_weight = 0.8
-        elif rating >= 3.0:
-            popularity_weight = 0.5
-        elif rating > 0:
-            popularity_weight = 0.3
-        else:
-            popularity_weight = 0.5  # 无评分，中性
 
-        landmarks.append(LandmarkInfo(
-            poi_id=poi_id,
-            name=poi.get("name", "未知地点"),
-            type=poi.get("type", "未知类型"),
-            address=poi.get("address", ""),
-            distance_m=distance,
-            location=poi_location,
-            estimated_arrival_min=round(estimated_arrival_min, 1),
-            preview_start_seconds=preview_seconds,
-            introduced_count=introduced_count,
-            selection_weight=compute_selection_weight(introduced_count, distance, is_ahead, typecode, popularity_weight),
-            province=poi.get("pname", ""),
-            city=poi.get("cityname", ""),
-            district=poi.get("adname", ""),
-        ).dict())
-        
-        print(f"  📍 {poi.get('name', '?')} | 距离 {distance}m | 方向 {bearing_to_poi:.0f}° (车头 {heading}° | 差异 {angle_diff:.0f}°) | 前方: {is_ahead} | 权重: {landmarks[-1]['selection_weight']:.3f}")
+        landmarks.append({
+            "poi_id": poi_id,
+            "name": poi.get("name", "未知地点"),
+            "type": poi.get("type", "未知类型"),
+            "typecode": poi.get("typecode", ""),
+            "address": poi.get("address", ""),
+            "distance_m": distance,
+            "location": poi_location,
+            "rating": rating,
+            "province": poi.get("pname", ""),
+            "city": poi.get("cityname", ""),
+            "district": poi.get("adname", ""),
+        })
 
-    sorted_landmarks = sorted(landmarks, key=lambda x: (-x["selection_weight"], x["distance_m"]))
-    # Apply frequency_level filtering to control how permissive selection is
-    # Map frequency_level to a minimum selection_weight threshold
-    if frequency_level < 20:
-        min_weight = 0.5
-    elif frequency_level < 50:
-        min_weight = 0.25
-    elif frequency_level < 80:
-        min_weight = 0.05
-    else:
-        min_weight = 0.0
-
-    filtered = [l for l in sorted_landmarks if l["selection_weight"] >= min_weight]
-
-    # If filtering is too strict and returns nothing, relax the filter gradually
-    if not filtered:
-        if frequency_level < 20:
-            # fallback: allow introduced_count==0 AND within search radius
-            filtered = [l for l in sorted_landmarks if l.get("introduced_count", 0) == 0 and l.get("selection_weight", 0) > 0 and l.get("distance_m", inf) <= MAX_SEARCH_RADIUS_METERS]
-        if not filtered:
-            # final fallback: all within search radius
-            filtered = [l for l in sorted_landmarks if l.get("distance_m", inf) <= MAX_SEARCH_RADIUS_METERS]
-        if not filtered:
-            filtered = sorted_landmarks
-
-    return filtered[:max_results]
-
-
-def select_landmark_for_session(candidates):
-    if not candidates:
-        return None
-
-    # 优先选择有正权重的候选项，否则在所有候选中挑一个最合适的
-    weighted = [c for c in candidates if c.get("selection_weight", 0.0) > 0.0]
-    available = weighted if weighted else candidates
-
-    weights = [c.get("selection_weight", 0.0) for c in available]
-    total = sum(weights)
-    if total > 0:
-        return random.choices(available, weights=weights, k=1)[0]
-
-    # 所有权重均为 0 时，选择最少介绍且距离最近的 POI
-    return min(available, key=lambda x: (x.get("introduced_count", 0), x.get("distance_m", inf)))
+    # 只按距离排序，不做任何过滤
+    landmarks.sort(key=lambda x: x["distance_m"])
+    return landmarks[:max_results]

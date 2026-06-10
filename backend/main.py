@@ -1,10 +1,8 @@
 import urllib.parse
 from fastapi import FastAPI, Response
 
-from models import RealTimeLocationPayload, LandmarkIntroRecordPayload, LandmarkSearchPayload
-from amap_landmarks import (
-    get_upcoming_landmarks,
-)
+from models import RealTimeLocationPayload, LandmarkIntroRecordPayload, LandmarkSearchPayload, SelectBestLandmarkPayload
+from amap_landmarks import get_upcoming_landmarks
 from deepseek_service import generate_radio_script, select_best_landmark
 from minimax_service import synthesize_audio
 
@@ -12,11 +10,11 @@ app = FastAPI(title="车载情感电台后端系统")
 
 
 # ==========================================
-# 📍 地标查询接口
+# 📍 地标查询接口（只查高德，不做过滤）
 # ==========================================
 @app.post("/upcoming-landmarks")
 async def upcoming_landmarks(payload: LandmarkSearchPayload):
-    print(f"[📡 地标预判] 经纬度: {payload.lat},{payload.lon} | 车速: {payload.speed_kmh} km/h | 方向: {payload.heading}° | 客户端历史: {len(payload.known_history)} 条")
+    print(f"[📡 地标查询] 经纬度: {payload.lat},{payload.lon} | 车速: {payload.speed_kmh} km/h | 方向: {payload.heading}°")
     try:
         landmarks = await get_upcoming_landmarks(
             lat=payload.lat,
@@ -24,34 +22,32 @@ async def upcoming_landmarks(payload: LandmarkSearchPayload):
             speed_kmh=payload.speed_kmh,
             heading=payload.heading,
             max_results=payload.max_results,
-            frequency_level=getattr(payload, 'frequency_level', 50),
-            known_history=getattr(payload, 'known_history', {}),
         )
-        selected = None
-        if landmarks:
-            try:
-                selected = await select_best_landmark(landmarks)
-                print(f"[✅ DeepSeek选中POI] {selected.get('name', '未知')} (id={selected.get('poi_id', 'unknown')})")
-            except Exception as e:
-                print(f"[⚠️  DeepSeek选POI失败，回退随机] {e}")
-                selected = landmarks[0]
-        if not selected:
-            print(f"[⚠️  无可用POI] 未找到满足条件的地标，候选数：{len(landmarks)}")
     except Exception as e:
         print(f"❌ 高德地标查询失败: {e}")
         return Response(status_code=500, content="Failed to query Amap landmarks")
 
     return {
-        "preview_lead_minutes": 3,
-        "speed_kmh": payload.speed_kmh,
-        "heading": payload.heading,
-        "search_radius_m": max(500, min(int(payload.speed_kmh * 1000 / 20), 5000)),
-        "frequency_level": getattr(payload, 'frequency_level', 50),
-        "heading_filter": "±90° (前方约180° 扇形范围)",
-        "selection_strategy": "选取前方扇形内、距离适中、未介绍过或<5次的 POI；已介绍>=5次排除",
         "candidates": landmarks,
-        "selected_landmark": selected,
     }
+
+
+# ==========================================
+# 🎯 DeepSeek 选最佳 POI（iOS 本地过滤后调用）
+# ==========================================
+@app.post("/select-best-landmark")
+async def select_best(payload: SelectBestLandmarkPayload):
+    candidates = [c.dict() for c in payload.candidates]
+    print(f"[🎯 选POI] 候选数: {len(candidates)}")
+    try:
+        selected = await select_best_landmark(candidates)
+        if selected:
+            print(f"[✅ DeepSeek选中] {selected.get('name', '?')} (id={selected.get('poi_id', '?')})")
+    except Exception as e:
+        print(f"[⚠️ DeepSeek选POI失败，回退第一个] {e}")
+        selected = candidates[0] if candidates else None
+
+    return {"selected_landmark": selected}
 
 
 # ==========================================
