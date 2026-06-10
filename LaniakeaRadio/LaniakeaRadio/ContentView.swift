@@ -310,15 +310,16 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     }
     
     func generateAndPlayRadio(speed: Int, music: String) async {
-        // 如果还没获取过 POI，先获取一次（手动点击按钮时走这里）
-        if selectedPOI == nil {
-            await fetchAndSelectPOI()
-        }
+        // 每次手动或自动触发时都重新获取最新 POI
+        await fetchAndSelectPOI()
 
         // 无可用 POI 时跳过播报
         guard let poi = selectedPOI, let _ = poi["name"] as? String else {
             print("⏭️ 无可播报 POI，跳过")
-            DispatchQueue.main.async { self.isLoading = false }
+            DispatchQueue.main.async {
+                self.isLoading = false
+                self.currentScript = "附近暂无景点，等待中..."
+            }
             return
         }
 
