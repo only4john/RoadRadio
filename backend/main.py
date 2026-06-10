@@ -4,7 +4,6 @@ from fastapi import FastAPI, Response
 from models import RealTimeLocationPayload, LandmarkIntroRecordPayload, LandmarkSearchPayload
 from amap_landmarks import (
     get_upcoming_landmarks,
-    record_landmark_introduction,
 )
 from deepseek_service import generate_radio_script, select_best_landmark
 from minimax_service import synthesize_audio
@@ -60,19 +59,8 @@ async def upcoming_landmarks(payload: LandmarkSearchPayload):
 # ==========================================
 @app.post("/record-landmark")
 async def record_landmark(payload: LandmarkIntroRecordPayload):
-    print(f"[💾 记录介绍] POI={payload.poi_id} 名称={payload.name}")
-    try:
-        record_landmark_introduction(
-            poi_id=payload.poi_id,
-            name=payload.name,
-            location=payload.location,
-            address=payload.address,
-            type=payload.type,
-        )
-    except Exception as e:
-        print(f"❌ 记录失败: {e}")
-        return Response(status_code=500, content="Failed to record landmark introduction")
-
+    # POI 历史已完全由客户端本地存储管理，服务端仅做记录
+    print(f"[📋 播报记录] POI={payload.poi_id} 名称={payload.name} (客户端已本地存储)")
     return {"status": "ok", "poi_id": payload.poi_id}
 
 
