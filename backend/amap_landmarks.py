@@ -1,12 +1,52 @@
 import os
 import random
 import httpx
-from math import inf
+from math import inf, sin, cos, sqrt, asin, pi, atan2
+
 from config import AMAP_API_KEY
 
 AMAP_PLACE_AROUND_URL = "https://restapi.amap.com/v3/place/around"
 AMAP_SEARCH_KEYWORDS = "历史建筑|文化地标|旅游景点|博物馆|纪念馆|公园"
 MAX_SEARCH_RADIUS_METERS = 2000
+
+# WGS84 → GCJ-02 火星坐标系转换常量
+_EARTH_A = 6378245.0  # 长半轴
+_EARTH_EE = 0.00669342162296594323  # 扁率
+
+
+def _out_of_china(lat: float, lon: float) -> bool:
+    """判断坐标是否在中国境外（境外不需要转换）"""
+    return lon < 72.004 or lon > 137.8347 or lat < 0.8293 or lat > 55.8271
+
+
+def _transform_lat(x: float, y: float) -> float:
+    ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * sqrt(abs(x))
+    ret += (20.0 * sin(6.0 * x * pi) + 20.0 * sin(2.0 * x * pi)) * 2.0 / 3.0
+    ret += (20.0 * sin(y * pi) + 40.0 * sin(y / 3.0 * pi)) * 2.0 / 3.0
+    ret += (160.0 * sin(y / 12.0 * pi) + 320.0 * sin(y * pi / 30.0)) * 2.0 / 3.0
+    return ret
+
+
+def _transform_lon(x: float, y: float) -> float:
+    ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * sqrt(abs(x))
+    ret += (20.0 * sin(6.0 * x * pi) + 20.0 * sin(2.0 * x * pi)) * 2.0 / 3.0
+    ret += (20.0 * sin(x * pi) + 40.0 * sin(x / 3.0 * pi)) * 2.0 / 3.0
+    ret += (150.0 * sin(x / 12.0 * pi) + 300.0 * sin(x / 30.0 * pi)) * 2.0 / 3.0
+    return ret
+
+
+def wgs84_to_gcj02(lat: float, lon: float) -> tuple[float, float]:
+    """WGS84 → GCJ-02 火星坐标系"""
+    if _out_of_china(lat, lon):
+        return lat, lon  # 境外不转换
+    dlat = _transform_lat(lon - 105.0, lat - 35.0)
+    dlon = _transform_lon(lon - 105.0, lat - 35.0)
+    radlat = lat / 180.0 * pi
+    magic = 1 - _EARTH_EE * sin(radlat) * sin(radlat)
+    sqrtmagic = sqrt(magic)
+    dlat = (dlat * 180.0) / ((_EARTH_A * (1 - _EARTH_EE)) / (magic * sqrtmagic) * pi)
+    dlon = (dlon * 180.0) / (_EARTH_A / sqrtmagic * cos(radlat) * pi)
+    return lat + dlat, lon + dlon
 
 
 def normalize_search_radius(speed_kmh: float) -> int:
@@ -155,10 +195,12 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
 
 async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, heading: int = 0, max_results: int = 5):
     """查询前方 POI（仅查高德 API，不做任何过滤，不过滤历史）"""
+    # WGS84 → GCJ-02 火星坐标转换
+    gcj_lat, gcj_lon = wgs84_to_gcj02(lat, lon)
     radius = normalize_search_radius(speed_kmh)
     params = {
         "key": AMAP_API_KEY,
-        "location": format_location(lat, lon),
+        "location": format_location(gcj_lat, gcj_lon),
         "keywords": AMAP_SEARCH_KEYWORDS,
         "radius": radius,
         "offset": max_results,
