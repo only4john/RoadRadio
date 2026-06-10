@@ -465,12 +465,15 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         let filtered = filterByLocalHistory(candidates)
         
         DispatchQueue.main.async {
+            let history = LandmarkHistoryManager.shared.allHistory()
             self.candidatePOIs = candidates.map { poi in
                 ["name": poi.name, "distance_m": poi.distance_m,
                  "type": poi.type, "poi_id": poi.poi_id,
                  "location": poi.location, "province": poi.province,
                  "city": poi.city, "district": poi.district,
-                 "address": poi.address]
+                 "address": poi.address,
+                 "rating": poi.rating,
+                 "introduced_count": history[poi.poi_id] ?? 0]
             }
         }
         
@@ -611,33 +614,39 @@ struct ContentView: View {
                 ZStack {
                     LinearGradient(gradient: Gradient(colors: [Color.black, Color.blue.opacity(0.8)]), startPoint: .topLeading, endPoint: .bottomTrailing)
                     
-                    VStack(spacing: 15) {
+                    VStack(spacing: 12) {
                         Image(systemName: "waveform.circle")
-                            .font(.system(size: 60))
+                            .font(.system(size: 50))
                             .foregroundColor(.white)
                             .symbolEffect(.bounce, value: radioManager.isPlaying)
                         
-                        Text("Laniakea Radio")
+                        Text("一路聊吧")
                             .font(.headline)
                             .foregroundColor(.gray)
                         
-                        Text(radioManager.currentMusicName)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                        
-                        Text("当前车速: \(radioManager.displaySpeedKmh) km/h · 方向: \(radioManager.displayHeadingDeg)°")
+                        Text("车速: \(radioManager.displaySpeedKmh) km/h · 方向: \(radioManager.displayHeadingDeg)°")
                             .font(.subheadline)
                             .foregroundColor(.white.opacity(0.8))
+                        
                         HStack(spacing: 12) {
                             if !radioManager.weatherDescription.isEmpty {
-                                Text("天气: \(radioManager.weatherDescription) \(radioManager.temperature)℃")
+                                Text("\(radioManager.weatherDescription) \(radioManager.temperature)℃")
                                     .font(.caption)
                                     .foregroundColor(.white.opacity(0.85))
                             }
                             Text(radioManager.formattedTimeOfDay())
                                 .font(.caption)
                                 .foregroundColor(.white.opacity(0.85))
+                        }
+                        
+                        Text("坐标: \(String(format: "%.5f", radioManager.displayLatitude)), \(String(format: "%.5f", radioManager.displayLongitude))")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.6))
+                        
+                        if !radioManager.currentMusicName.isEmpty && radioManager.currentMusicName != "无" {
+                            Text("🎵 \(radioManager.currentMusicName)")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.5))
                         }
 
                         // BGM 开关
@@ -649,23 +658,12 @@ struct ContentView: View {
                                 systemImage: radioManager.bgmEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill"
                             )
                             .font(.caption2)
-                            .foregroundColor(.white.opacity(0.8))
-                        }
-
-                        // 小字显示经纬度与当前音乐信息
-                        Text("坐标: \(String(format: "%.5f", radioManager.displayLatitude)), \(String(format: "%.5f", radioManager.displayLongitude))  ·  当前音乐: \(radioManager.currentMusicName)")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.75))
-
-                        if !radioManager.generatedAudioFilename.isEmpty {
-                            Text("播放文件: \(radioManager.generatedAudioFilename)")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.7))
+                            .foregroundColor(.white.opacity(0.7))
                         }
 
                         #if targetEnvironment(simulator)
                         VStack(spacing: 4) {
-                            Text("模拟器固定测试值")
+                            Text("模拟器测试")
                                 .font(.caption2)
                                 .foregroundColor(.yellow)
                             HStack {
@@ -686,45 +684,39 @@ struct ContentView: View {
                                     .font(.caption2)
                                     .foregroundColor(.white.opacity(0.7))
                             }
-                            HStack {
-                                Text("起点")
-                                    .font(.caption2)
-                                    .foregroundColor(.white.opacity(0.7))
-                                Text("武汉大学附近")
-                                    .font(.caption2)
-                                    .foregroundColor(.yellow)
-                            }
                         }
                         #endif
 
-                        if !radioManager.selectedPOIName.isEmpty {
-                            Text("目标：\(radioManager.selectedPOIName)")
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.9))
-                            if !radioManager.deepseekReason.isEmpty {
-                                Text("理由：\(radioManager.deepseekReason)")
-                                    .font(.caption2)
-                                    .foregroundColor(.white.opacity(0.7))
-                            }
-                        }
-
                         // 候选 POI 列表
                         if !radioManager.candidatePOIs.isEmpty {
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text("前方候选：")
-                                    .font(.caption2)
-                                    .foregroundColor(.white.opacity(0.6))
-                                ForEach(radioManager.candidatePOIs.indices, id: \.self) { idx in
-                                    let poi = radioManager.candidatePOIs[idx]
-                                    let name = poi["name"] as? String ?? "?"
-                                    let dist = poi["distance_m"] as? Int ?? 0
-                                    let type = poi["type"] as? String ?? ""
-                                    let weight = poi["selection_weight"] as? Double ?? 0
-                                    let isSelected = (poi["name"] as? String) == radioManager.selectedPOIName
-                                    Text("\(name) · \(dist)m · \(type) · 权重\(String(format: "%.2f", weight))")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(isSelected ? .yellow : .white.opacity(0.55))
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.7))
+                                ScrollView(.vertical, showsIndicators: true) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        ForEach(radioManager.candidatePOIs.indices, id: \.self) { idx in
+                                            let poi = radioManager.candidatePOIs[idx]
+                                            let name = poi["name"] as? String ?? "?"
+                                            let dist = poi["distance_m"] as? Int ?? 0
+                                            let type = poi["type"] as? String ?? ""
+                                            let weight = poi["selection_weight"] as? Double ?? 0
+                                            let rating = poi["rating"] as? Double ?? 0
+                                            let count = poi["introduced_count"] as? Int ?? 0
+                                            let isSelected = (poi["name"] as? String) == radioManager.selectedPOIName
+                                            
+                                            VStack(alignment: .leading, spacing: 1) {
+                                                Text("\(name)  \(dist)m")
+                                                    .font(.system(size: 11, weight: .medium))
+                                                    .foregroundColor(isSelected ? .yellow : .white)
+                                                Text("类别: \(type)  评分: \(String(format: "%.1f", rating))  播过: \(count)次  权重: \(String(format: "%.2f", weight))")
+                                                    .font(.system(size: 9))
+                                                    .foregroundColor(isSelected ? .yellow.opacity(0.8) : .white.opacity(0.5))
+                                            }
+                                        }
+                                    }
                                 }
+                                .frame(maxHeight: 120)
                             }
                             .padding(.horizontal, 8)
                         }
