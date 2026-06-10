@@ -163,7 +163,8 @@ def _get_type_weight(typecode: str) -> float:
     return DEFAULT_POI_TYPE_WEIGHT
 
 
-def compute_selection_weight(introduced_count: int, distance_m: int, is_ahead: bool = True, typecode: str = "") -> float:
+def compute_selection_weight(introduced_count: int, distance_m: int, is_ahead: bool = True,
+                              typecode: str = "", popularity_weight: float = 0.5) -> float:
     # 介绍次数 >= 5 次：直接排除
     if introduced_count >= 5:
         return 0.0
@@ -176,13 +177,12 @@ def compute_selection_weight(introduced_count: int, distance_m: int, is_ahead: b
     if distance_m > MAX_SEARCH_RADIUS_METERS:
         return 0.0
     
-    # 权重 = 类型权重 × 熟悉度 × 距离衰减
-    # 未介绍过时权重最高，介绍过1-4次时权重递减
+    # 权重 = 类型权重 × 热度评分 × 熟悉度 × 距离衰减
     type_weight = _get_type_weight(typecode)
     frequency_weight = 1.0 / (1.0 + introduced_count * 0.5)
     proximity_weight = max(0.2, 1.0 - min(distance_m, MAX_SEARCH_RADIUS_METERS) / MAX_SEARCH_RADIUS_METERS)
     
-    return type_weight * frequency_weight * proximity_weight
+    return type_weight * popularity_weight * frequency_weight * proximity_weight
 
 
 def _normalize_poi_id(poi):
@@ -257,7 +257,7 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
     if speed_kmh < 5.0:
         return True
 
-    heading_tolerance = 60  # ±60°，即前方 120° 扇形
+    heading_tolerance = 30  # ±30°，即前方 60° 扇形
 
     poi_pos = _parse_location(poi_location_str)
     if not poi_pos:
@@ -278,7 +278,7 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
         "keywords": AMAP_SEARCH_KEYWORDS,
         "radius": radius,
         "offset": max_results,
-        "extensions": "base",
+        "extensions": "all",
         "sortrule": "distance"
     }
 
@@ -318,6 +318,24 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
         history = _get_history_record(poi_id) or {}
         typecode = poi.get("typecode", "")
 
+        # 提取高德评分（biz_ext.rating），作为 popularity_weight
+        biz_ext = poi.get("biz_ext", {}) or {}
+        rating_str = biz_ext.get("rating", "")
+        try:
+            rating = float(rating_str) if rating_str else 0.0
+        except (ValueError, TypeError):
+            rating = 0.0
+        if rating >= 4.5:
+            popularity_weight = 1.0
+        elif rating >= 4.0:
+            popularity_weight = 0.8
+        elif rating >= 3.0:
+            popularity_weight = 0.5
+        elif rating > 0:
+            popularity_weight = 0.3
+        else:
+            popularity_weight = 0.5  # 无评分，中性
+
         landmarks.append(LandmarkInfo(
             poi_id=poi_id,
             name=poi.get("name", "未知地点"),
@@ -328,7 +346,7 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
             estimated_arrival_min=round(estimated_arrival_min, 1),
             preview_start_seconds=preview_seconds,
             introduced_count=history.get("introduced_count", 0),
-            selection_weight=compute_selection_weight(history.get("introduced_count", 0), distance, is_ahead, typecode),
+            selection_weight=compute_selection_weight(history.get("introduced_count", 0), distance, is_ahead, typecode, popularity_weight),
             province=poi.get("pname", ""),
             city=poi.get("cityname", ""),
             district=poi.get("adname", ""),

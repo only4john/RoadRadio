@@ -38,7 +38,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     // 自动播报冷却
     private var lastAutoBroadcastTime: Date = .distantPast
-    private let autoBroadcastCooldown: TimeInterval = 90  // 两次自动播报至少间隔 90 秒
+    private var lastAutoBroadcastPOIId: String = ""  // 上次自动播报的 POI，避免重复
 
     // 模拟器测试覆盖值
     @Published var simulatedLatitude: Double = 30.5444
@@ -165,19 +165,18 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     /// 根据当前频率和 POI 权重自动决定是否触发播报
     private func triggerAutoBroadcastIfNeeded() {
-        // 正在播放时不重复触发
         guard !isPlaying else { return }
-        // 冷却时间内不触发
-        guard Date().timeIntervalSince(lastAutoBroadcastTime) >= autoBroadcastCooldown else { return }
-        // 速度太低（静止或步行）不自动播报，避免频繁触发
+        // 动态冷却：速度越慢间隔越长（低速时 POI 不轻易变化）
+        let cooldown: TimeInterval = displaySpeedKmh > 60 ? 90 : (displaySpeedKmh > 30 ? 150 : 240)
+        guard Date().timeIntervalSince(lastAutoBroadcastTime) >= cooldown else { return }
         guard displaySpeedKmh >= 10 else { return }
 
         let threshold: Double
         switch broadcastFrequency {
-        case 80...100: threshold = 0.0    // 最高频率：任意前方 POI 都触发
+        case 80...100: threshold = 0.0
         case 50..<80:  threshold = 0.1
         case 20..<50:  threshold = 0.3
-        default:       return             // 最低频率：不自动播报，仅手动
+        default:       return
         }
 
         Task {
@@ -186,7 +185,15 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
                   let weight = poi["selection_weight"] as? Double,
                   weight >= threshold else { return }
 
+            // 避免短时间内重复播报同一个 POI
+            let poiId = poi["poi_id"] as? String ?? ""
+            if poiId == lastAutoBroadcastPOIId && displaySpeedKmh < 40 {
+                print("⏭️ 跳过重复 POI: \(poi["name"] ?? "?")（同一 POI 且车速低）")
+                return
+            }
+
             lastAutoBroadcastTime = Date()
+            lastAutoBroadcastPOIId = poiId
             print("🚗 自动播报触发！POI: \(poi["name"] ?? "?") 权重: \(weight)")
             await generateAndPlayRadio(speed: displaySpeedKmh, music: currentMusicName)
         }
