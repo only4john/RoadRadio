@@ -32,14 +32,23 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
     # 动态生成用户提示词（随机选取元素、风格、气氛、内容方向）
     user_prompt = build_radio_prompt(payload)
     
-    # 构建请求
+    # 构建请求（联网搜索模式：让 DeepSeek 自动查资料减少幻觉）
     request_body = {
         "model": "deepseek-chat",
         "messages": [
             {"role": "system", "content": DEEPSEEK_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
         ],
-        "response_format": {"type": "json_object"}
+        "response_format": {"type": "json_object"},
+        "tools": [
+            {
+                "type": "web_search",
+                "web_search": {
+                    "search_result_format": "text",
+                    "enable": True
+                }
+            }
+        ]
     }
     
     # 💡 绝对防御：直接将中文字典转为纯 UTF-8 字节流，杜绝系统 ASCII 隐式转码崩溃
