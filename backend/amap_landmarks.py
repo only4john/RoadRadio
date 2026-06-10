@@ -11,15 +11,15 @@ MAX_SEARCH_RADIUS_METERS = 2000
 
 def normalize_search_radius(speed_kmh: float) -> int:
     if speed_kmh <= 0:
-        return 100
+        return 500  # 静止时 500m，确保室内也能找到附近 POI
     elif speed_kmh <= 30:
-        return 100
-    elif speed_kmh <= 70:
-        return 200
-    elif speed_kmh <= 100:
         return 500
+    elif speed_kmh <= 70:
+        return 800
+    elif speed_kmh <= 100:
+        return 1500
     else:
-        return 2000
+        return 3000
 
 
 def format_location(lat: float, lon: float) -> str:
