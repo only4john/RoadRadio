@@ -138,7 +138,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E0010003E0010003E0010003 /* ../swift_models.swift in Sources */,
+				E0010003E0010003E0010003 /* LaniakeaRadio/swift_models.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -29,3 +29,14 @@ class LandmarkIntroRecordPayload(BaseModel):
     location: str
     address: str = ""
     type: str = ""
+
+
+class LandmarkSearchPayload(BaseModel):
+    """地标查询请求体 — 支持客户端传入本地历史"""
+    lat: float
+    lon: float
+    speed_kmh: float = 40.0
+    heading: int = 0
+    max_results: int = 5
+    frequency_level: int = 50
+    known_history: dict[str, int] = {}  # {poi_id: introduced_count} 客户端本地历史

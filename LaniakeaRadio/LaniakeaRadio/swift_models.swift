@@ -51,19 +51,25 @@ struct LandmarkSearchPayload: Codable {
     let speed_kmh: Float      // 当前车速
     let heading: Int          // 当前方向 (0-360°)
     let max_results: Int      // 最多返回多少个候选 (默认5)
+    let frequency_level: Int  // 播报频率 0-100
+    let known_history: [String: Int]  // 客户端本地 POI 历史 {poi_id: count}
     
     init(
         lat: Double,
         lon: Double,
         speed_kmh: Float,
         heading: Int,
-        max_results: Int = 5
+        max_results: Int = 5,
+        frequency_level: Int = 50,
+        known_history: [String: Int] = [:]
     ) {
         self.lat = lat
         self.lon = lon
         self.speed_kmh = speed_kmh
         self.heading = heading
         self.max_results = max_results
+        self.frequency_level = frequency_level
+        self.known_history = known_history
     }
 }
 

@@ -410,7 +410,8 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             "speed_kmh": displaySpeedKmh,
             "heading": displayHeadingDeg,
             "max_results": 5,
-            "frequency_level": broadcastFrequency
+            "frequency_level": broadcastFrequency,
+            "known_history": LandmarkHistoryManager.shared.allHistory()
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
@@ -514,6 +515,11 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     // 播放结束时记录介绍
     private func recordLandmarkIntro() {
         guard let poi = selectedPOI, let poi_id = poi["poi_id"] as? String, let name = poi["name"] as? String, let location = poi["location"] as? String else { return }
+        
+        // ✅ 客户端本地写入（核心：每人独立历史）
+        LandmarkHistoryManager.shared.recordIntroduction(poiId: poi_id)
+        
+        // 服务器同步记录（可选，用于统计分析）
         guard let url = URL(string: "\(serverBaseURL)/record-landmark") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

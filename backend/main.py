@@ -1,9 +1,8 @@
 import urllib.parse
 from fastapi import FastAPI, Response
 
-from models import RealTimeLocationPayload, LandmarkIntroRecordPayload
+from models import RealTimeLocationPayload, LandmarkIntroRecordPayload, LandmarkSearchPayload
 from amap_landmarks import (
-    LandmarkSearchPayload,
     get_upcoming_landmarks,
     record_landmark_introduction,
 )
@@ -18,7 +17,7 @@ app = FastAPI(title="车载情感电台后端系统")
 # ==========================================
 @app.post("/upcoming-landmarks")
 async def upcoming_landmarks(payload: LandmarkSearchPayload):
-    print(f"[📡 地标预判] 经纬度: {payload.lat},{payload.lon} | 车速: {payload.speed_kmh} km/h | 方向: {payload.heading}°")
+    print(f"[📡 地标预判] 经纬度: {payload.lat},{payload.lon} | 车速: {payload.speed_kmh} km/h | 方向: {payload.heading}° | 客户端历史: {len(payload.known_history)} 条")
     try:
         landmarks = await get_upcoming_landmarks(
             lat=payload.lat,
@@ -27,6 +26,7 @@ async def upcoming_landmarks(payload: LandmarkSearchPayload):
             heading=payload.heading,
             max_results=payload.max_results,
             frequency_level=getattr(payload, 'frequency_level', 50),
+            known_history=getattr(payload, 'known_history', {}),
         )
         selected = None
         if landmarks:

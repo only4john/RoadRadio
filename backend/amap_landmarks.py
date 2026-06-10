@@ -1,10 +1,7 @@
 import os
 import random
-import sqlite3
 import httpx
 from math import inf
-from datetime import datetime
-from pydantic import BaseModel
 from config import AMAP_API_KEY
 
 AMAP_PLACE_AROUND_URL = "https://restapi.amap.com/v3/place/around"
@@ -25,105 +22,6 @@ POI_TYPE_WEIGHTS = {
     "050000": 0.2,   # 餐饮美食
 }
 DEFAULT_POI_TYPE_WEIGHT = 0.5  # 未匹配分类的默认权重
-HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", os.path.join(os.path.dirname(__file__), "landmark_history.db"))
-
-
-class LandmarkSearchPayload(BaseModel):
-    lat: float
-    lon: float
-    speed_kmh: float = 40.0
-    heading: int = 0  # 0-360, compass bearing (0=North, 90=East, 180=South, 270=West)
-    max_results: int = 5
-    frequency_level: int = 50  # 0-100, controls how frequently to include less-famous POIs
-
-
-class LandmarkInfo(BaseModel):
-    poi_id: str
-    name: str
-    type: str
-    address: str
-    distance_m: int
-    location: str
-    estimated_arrival_min: float
-    preview_start_seconds: int
-    introduced_count: int = 0
-    selection_weight: float = 0.0
-    province: str = ""   # 省
-    city: str = ""       # 市
-    district: str = ""   # 区/县
-
-
-class LandmarkRecordPayload(BaseModel):
-    poi_id: str
-    name: str
-    location: str
-    address: str = ""
-    type: str = ""
-
-
-def _ensure_history_db():
-    conn = sqlite3.connect(HISTORY_DB_PATH)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS landmark_history (
-            poi_id TEXT PRIMARY KEY,
-            name TEXT,
-            location TEXT,
-            address TEXT,
-            type TEXT,
-            introduced_count INTEGER DEFAULT 0,
-            last_introduced TEXT
-        )
-        """
-    )
-    conn.commit()
-    conn.close()
-
-
-def _get_history_record(poi_id: str):
-    conn = sqlite3.connect(HISTORY_DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT poi_id, name, location, address, type, introduced_count, last_introduced FROM landmark_history WHERE poi_id = ?",
-        (poi_id,)
-    )
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {
-            "poi_id": row[0],
-            "name": row[1],
-            "location": row[2],
-            "address": row[3],
-            "type": row[4],
-            "introduced_count": row[5],
-            "last_introduced": row[6],
-        }
-    return None
-
-
-def record_landmark_introduction(poi_id: str, name: str, location: str, address: str = "", type: str = ""):
-    _ensure_history_db()
-    now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(HISTORY_DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT introduced_count FROM landmark_history WHERE poi_id = ?",
-        (poi_id,)
-    )
-    row = cursor.fetchone()
-    if row:
-        cursor.execute(
-            "UPDATE landmark_history SET introduced_count = introduced_count + 1, last_introduced = ?, name = ?, location = ?, address = ?, type = ? WHERE poi_id = ?",
-            (now, name, location, address, type, poi_id)
-        )
-    else:
-        cursor.execute(
-            "INSERT INTO landmark_history (poi_id, name, location, address, type, introduced_count, last_introduced) VALUES (?, ?, ?, ?, ?, 1, ?)",
-            (poi_id, name, location, address, type, now)
-        )
-    conn.commit()
-    conn.close()
 
 
 def normalize_search_radius(speed_kmh: float) -> int:
@@ -270,7 +168,10 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
     return angle_diff <= heading_tolerance
 
 
-async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, heading: int = 0, max_results: int = 5, frequency_level: int = 50):
+async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, heading: int = 0, max_results: int = 5, frequency_level: int = 50, known_history: dict = None):
+    """查询前方 POI，支持客户端传入本地历史 known_history = {poi_id: introduced_count}"""
+    if known_history is None:
+        known_history = {}
     radius = normalize_search_radius(speed_kmh)
     params = {
         "key": AMAP_API_KEY,
@@ -315,7 +216,8 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
             bearing_to_poi = -1
             angle_diff = 180
         
-        history = _get_history_record(poi_id) or {}
+        # 使用客户端传入的本地历史
+        introduced_count = known_history.get(poi_id, 0)
         typecode = poi.get("typecode", "")
 
         # 提取高德评分（biz_ext.rating），作为 popularity_weight
@@ -345,8 +247,8 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
             location=poi_location,
             estimated_arrival_min=round(estimated_arrival_min, 1),
             preview_start_seconds=preview_seconds,
-            introduced_count=history.get("introduced_count", 0),
-            selection_weight=compute_selection_weight(history.get("introduced_count", 0), distance, is_ahead, typecode, popularity_weight),
+            introduced_count=introduced_count,
+            selection_weight=compute_selection_weight(introduced_count, distance, is_ahead, typecode, popularity_weight),
             province=poi.get("pname", ""),
             city=poi.get("cityname", ""),
             district=poi.get("adname", ""),
@@ -397,7 +299,3 @@ def select_landmark_for_session(candidates):
 
     # 所有权重均为 0 时，选择最少介绍且距离最近的 POI
     return min(available, key=lambda x: (x.get("introduced_count", 0), x.get("distance_m", inf)))
-
-
-# Load or initialize the database immediately when the module is imported.
-_ensure_history_db()
