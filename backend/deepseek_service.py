@@ -143,8 +143,11 @@ async def select_best_landmark(candidates: list) -> dict:
 
     idx = data.get("index", 1) - 1
     if 0 <= idx < len(candidates):
-        chosen = candidates[idx]
+        chosen = dict(candidates[idx])  # copy
+        chosen["_selection_reason"] = data.get("reason", "")
         print(f"✅ DeepSeek 选中: {data.get('name')} — {data.get('reason')}")
         return chosen
     print(f"⚠️ DeepSeek 返回无效索引，回退到第一个候选")
-    return candidates[0]
+    fallback = dict(candidates[0])
+    fallback["_selection_reason"] = "（回退选择）"
+    return fallback

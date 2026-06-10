@@ -185,10 +185,10 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
                   let weight = poi["selection_weight"] as? Double,
                   weight >= threshold else { return }
 
-            // 避免短时间内重复播报同一个 POI
+            // 避免重复播报同一个 POI
             let poiId = poi["poi_id"] as? String ?? ""
-            if poiId == lastAutoBroadcastPOIId && displaySpeedKmh < 40 {
-                print("⏭️ 跳过重复 POI: \(poi["name"] ?? "?")（同一 POI 且车速低）")
+            if poiId == lastAutoBroadcastPOIId {
+                print("⏭️ 跳过重复 POI: \(poi["name"] ?? "?")")
                 return
             }
 
