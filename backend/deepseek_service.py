@@ -59,6 +59,24 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
             response.raise_for_status()
             response_json = response.json()
             
+            # 🔍 打印联网搜索返回（如果有的话）
+            if "choices" in response_json:
+                choice = response_json["choices"][0]
+                message = choice.get("message", {})
+                search_results = message.get("search_results", [])
+                if not search_results:
+                    search_results = response_json.get("search_results", [])
+                if search_results:
+                    print(f"🌐 DeepSeek 联网搜索到 {len(search_results)} 条资料：")
+                    for i, sr in enumerate(search_results[:5]):
+                        title = sr.get("title", sr.get("name", "?"))
+                        snippet = sr.get("snippet", sr.get("content", ""))[:150]
+                        print(f"  [{i+1}] {title}")
+                        if snippet:
+                            print(f"      {snippet}...")
+                else:
+                    print("🌐 本轮未触发联网搜索（可能是热点知识）")
+            
             # 提取剧本内容
             script_content = response_json['choices'][0]['message']['content']
             if isinstance(script_content, (dict, list)):
@@ -136,7 +154,18 @@ async def select_best_landmark(candidates: list) -> dict:
             content=request_bytes,
         )
         resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
+        data_raw = resp.json()
+        
+        # 🔍 打印联网搜索结果
+        if "choices" in data_raw:
+            msg = data_raw["choices"][0].get("message", {})
+            sr = msg.get("search_results", [])
+            if sr:
+                print(f"🌐 DeepSeek 搜索到 {len(sr)} 条资料：")
+                for i, s in enumerate(sr[:3]):
+                    print(f"  [{i+1}] {s.get('title','?')}")
+        
+        content = data_raw["choices"][0]["message"]["content"]
         try:
             data = json.loads(content)
         except json.JSONDecodeError:
