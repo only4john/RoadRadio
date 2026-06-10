@@ -38,7 +38,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     // 自动播报冷却
     private var lastAutoBroadcastTime: Date = .distantPast
-    private var lastAutoBroadcastPOIId: String = ""  // 上次自动播报的 POI，避免重复
+    var lastAutoBroadcastPOIId: String = ""  // 上次自动播报的 POI，避免重复
 
     // 模拟器测试覆盖值
     @Published var simulatedLatitude: Double = 30.5444
