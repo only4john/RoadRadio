@@ -39,7 +39,8 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
             {"role": "system", "content": DEEPSEEK_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
         ],
-        "response_format": {"type": "json_object"}
+        "response_format": {"type": "json_object"},
+        "enable_search": True
     }
     
     # 💡 绝对防御：直接将中文字典转为纯 UTF-8 字节流，杜绝系统 ASCII 隐式转码崩溃
@@ -123,6 +124,7 @@ async def select_best_landmark(candidates: list) -> dict:
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.7,
+        "enable_search": True,
     }
 
     request_bytes = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
