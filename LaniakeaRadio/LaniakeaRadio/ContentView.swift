@@ -195,7 +195,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             lastAutoBroadcastTime = Date()
             lastAutoBroadcastPOIId = poiId
             print("🚗 自动播报触发！POI: \(poi["name"] ?? "?") 权重: \(weight)")
-            await generateAndPlayRadio(speed: displaySpeedKmh, music: currentMusicName)
+            await generateAndPlayRadio(speed: displaySpeedKmh, music: currentMusicName, prefetchedPOI: poi)
         }
     }
 
@@ -309,9 +309,13 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         }
     }
     
-    func generateAndPlayRadio(speed: Int, music: String) async {
-        // 每次手动或自动触发时都重新获取最新 POI
-        await fetchAndSelectPOI()
+    func generateAndPlayRadio(speed: Int, music: String, prefetchedPOI: [String: Any]? = nil) async {
+        // auto-broadcast 已有 POI，不要再查；手动按钮才查
+        if let poi = prefetchedPOI {
+            self.selectedPOI = poi
+        } else {
+            await fetchAndSelectPOI()
+        }
 
         // 无可用 POI 时跳过播报
         guard let poi = selectedPOI, let _ = poi["name"] as? String else {
@@ -424,10 +428,15 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         }
     }
     
-    // ─── 第二步：iOS 本地过滤（≥5次排除）──────────────────
+    // ─── 第二步：iOS 本地过滤（评分<3 排除，≥5次排除）────
     func filterByLocalHistory(_ candidates: [RawPOICandidate]) -> [RawPOICandidate] {
         let history = LandmarkHistoryManager.shared.allHistory()
-        return candidates.filter { (history[$0.poi_id] ?? 0) < 5 }
+        return candidates.filter { poi in
+            let count = history[poi.poi_id] ?? 0
+            if count >= 5 { return false }   // 播过 ≥5 次，排除
+            if poi.rating > 0 && poi.rating < 3.0 { return false }  // 有评分但 <3，排除
+            return true
+        }
     }
     
     // ─── 第三步：DeepSeek 选最佳 ──────────────────────────
