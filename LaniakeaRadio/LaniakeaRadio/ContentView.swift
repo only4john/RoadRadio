@@ -189,6 +189,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             let poiId = poi["poi_id"] as? String ?? ""
             if poiId == lastAutoBroadcastPOIId {
                 print("⏭️ 跳过重复 POI: \(poi["name"] ?? "?")")
+                DispatchQueue.main.async { self.currentScript = "" }
                 return
             }
 
@@ -771,6 +772,7 @@ struct ContentView: View {
 
                         Button(action: {
                             Task {
+                                radioManager.lastAutoBroadcastPOIId = ""  // 手动播报清重复标记
                                 radioManager.isLoading = true
                                 await radioManager.generateAndPlayRadio(speed: radioManager.displaySpeedKmh, music: radioManager.currentMusicName)
                             }
