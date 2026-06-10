@@ -47,7 +47,10 @@ async def select_best(payload: SelectBestLandmarkPayload):
         print(f"[⚠️ DeepSeek选POI失败，回退第一个] {e}")
         selected = candidates[0] if candidates else None
 
-    return {"selected_landmark": selected}
+    return {
+        "selected_landmark": selected,
+        "reason": selected.get("_selection_reason", "") if selected else "",
+    }
 
 
 # ==========================================

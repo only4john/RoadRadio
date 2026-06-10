@@ -180,7 +180,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         }
 
         Task {
-            await fetchUpcomingLandmarks()
+            await fetchAndSelectPOI()
             guard let poi = selectedPOI,
                   let weight = poi["selection_weight"] as? Double,
                   weight >= threshold else { return }
@@ -313,7 +313,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     func generateAndPlayRadio(speed: Int, music: String) async {
         // 如果还没获取过 POI，先获取一次（手动点击按钮时走这里）
         if selectedPOI == nil {
-            await fetchUpcomingLandmarks()
+            await fetchAndSelectPOI()
         }
 
         // 无可用 POI 时跳过播报
@@ -431,13 +431,13 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     }
     
     // ─── 第三步：DeepSeek 选最佳 ──────────────────────────
-    func selectBestLandmark(from filtered: [RawPOICandidate]) async -> RawPOICandidate? {
-        guard !filtered.isEmpty else { return nil }
+    func selectBestLandmark(from filtered: [RawPOICandidate]) async -> (RawPOICandidate?, String) {
+        guard !filtered.isEmpty else { return (nil, "") }
         
         // 如果只剩一个，直接返回
-        if filtered.count == 1 { return filtered[0] }
+        if filtered.count == 1 { return (filtered[0], "（唯一候选）") }
         
-        guard let url = URL(string: "\(serverBaseURL)/select-best-landmark") else { return filtered.first }
+        guard let url = URL(string: "\(serverBaseURL)/select-best-landmark") else { return (filtered.first, "") }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -447,17 +447,17 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return filtered.first }
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return (filtered.first, "") }
             let decoded = try JSONDecoder().decode(SelectBestLandmarkResponse.self, from: data)
             if let selected = decoded.selected_landmark {
-                print("[✅ DeepSeek选中] \(selected.name)")
-                return selected
+                let reason = decoded.reason ?? ""
+                print("[✅ DeepSeek选中] \(selected.name) — \(reason)")
+                return (selected, reason)
             }
         } catch {
             print("[⚠️ DeepSeek选POI失败] \(error)")
         }
-        return filtered.first
-    }
+        return (filtered.first, "")
     
     // ─── 综合流程：查 → 过滤 → 选 ─────────────────────────
     func fetchAndSelectPOI() async {
@@ -474,7 +474,8 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             }
         }
         
-        guard let best = await selectBestLandmark(from: filtered) else {
+        let (best, reason) = await selectBestLandmark(from: filtered)
+        guard let best = best else {
             print("[⚠️ 无可用POI] 候选\(candidates.count)个，过滤后0个")
             return
         }
@@ -493,6 +494,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         DispatchQueue.main.async {
             self.currentScript = "准备播报：\(best.name)"
             self.selectedPOIName = best.name
+            self.deepseekReason = reason
         }
     }
 

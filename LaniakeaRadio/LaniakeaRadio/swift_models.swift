@@ -101,6 +101,7 @@ struct SelectBestLandmarkPayload: Codable {
 
 struct SelectBestLandmarkResponse: Codable {
     let selected_landmark: RawPOICandidate?
+    let reason: String?
 }
 
 /// 地标介绍记录 - 用于 POST /record-landmark
