@@ -23,6 +23,8 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @Published var longitude: Double = 0
     @Published var speedKmh: Int = 0
     @Published var headingDeg: Int = 0
+    private var smoothedHeading: Double = 0  // 平滑后的方向，减少抖动
+    private var headingInitialized = false
     @Published var isLoading: Bool = false
     @Published var selectedPOIName: String = ""
     @Published var broadcastFrequency: Int = 50 // 0 = 最低，只播著名景点；100 = 最高，频繁播报
@@ -149,9 +151,17 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             self.latitude = lat
             self.longitude = lon
             self.speedKmh = Int(max(0, loc.speed) * 3.6)
-            // 优先使用 GPS 路径的 course 作为方向（若有效），否则保留原有 heading
+            // 📐 指数移动平均平滑 GPS 方向（α=0.3，越新数据权重越大，但不会跳变）
             if loc.course >= 0 {
-                self.headingDeg = Int(loc.course)
+                let rawHeading = loc.course
+                if !self.headingInitialized {
+                    self.smoothedHeading = rawHeading
+                    self.headingInitialized = true
+                } else {
+                    let alpha = 0.3  // 平滑系数：0~1，越小越平滑（0.3 = 新数据占30%）
+                    self.smoothedHeading = alpha * rawHeading + (1 - alpha) * self.smoothedHeading
+                }
+                self.headingDeg = Int(self.smoothedHeading)
             }
         }
         // GPS 首次定位后立刻获取天气（用 loc 原始坐标，不依赖 self.latitude 异步赋值）
@@ -202,8 +212,13 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
         DispatchQueue.main.async {
-            let heading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
-            self.headingDeg = Int(heading)
+            let rawHeading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+            // GPS 方向优先，陀螺仪只在 GPS 未初始化时作为初始值
+            if !self.headingInitialized {
+                self.smoothedHeading = rawHeading
+                self.headingInitialized = true
+                self.headingDeg = Int(rawHeading)
+            }
         }
     }
     
