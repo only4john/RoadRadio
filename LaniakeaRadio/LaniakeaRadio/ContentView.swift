@@ -169,7 +169,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         // 动态冷却：速度越慢间隔越长（低速时 POI 不轻易变化）
         let cooldown: TimeInterval = displaySpeedKmh > 60 ? 90 : (displaySpeedKmh > 30 ? 150 : 240)
         guard Date().timeIntervalSince(lastAutoBroadcastTime) >= cooldown else { return }
-        guard displaySpeedKmh >= 10 else { return }
+        guard displaySpeedKmh >= 0 else { return }  // 允许低速/静止时也触发
 
         let threshold: Double
         switch broadcastFrequency {
@@ -201,7 +201,6 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
         DispatchQueue.main.async {
-            // 使用 trueHeading (-1 表示无效)
             let heading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
             self.headingDeg = Int(heading)
         }
@@ -458,6 +457,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             print("[⚠️ DeepSeek选POI失败] \(error)")
         }
         return (filtered.first, "")
+    }
     
     // ─── 综合流程：查 → 过滤 → 选 ─────────────────────────
     func fetchAndSelectPOI() async {
@@ -489,7 +489,8 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             "distance_m": best.distance_m,
             "province": best.province,
             "city": best.city,
-            "district": best.district
+            "district": best.district,
+            "selection_weight": 1.0  // 经本地过滤+DeepSeek选中的，权重设为 1.0
         ]
         DispatchQueue.main.async {
             self.currentScript = "准备播报：\(best.name)"
