@@ -621,9 +621,14 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                // 上半部：环境感知与音乐状态区
+                // 上半部：环境感知与状态区（紫色黄昏风）
                 ZStack {
-                    LinearGradient(gradient: Gradient(colors: [Color.black, Color.blue.opacity(0.8)]), startPoint: .topLeading, endPoint: .bottomTrailing)
+                    LinearGradient(gradient: Gradient(colors: [
+                        Color(red: 0.18, green: 0.06, blue: 0.35),  // 深紫夜空
+                        Color(red: 0.40, green: 0.15, blue: 0.50),  // 紫
+                        Color(red: 0.70, green: 0.30, blue: 0.35),  // 紫粉
+                        Color(red: 0.92, green: 0.55, blue: 0.30)   // 黄昏金橙
+                    ]), startPoint: .top, endPoint: .bottom)
                     
                     VStack(spacing: 12) {
                         Image(systemName: "waveform.circle")
@@ -735,20 +740,21 @@ struct ContentView: View {
                 }
                 .frame(height: geometry.size.height / 2)
                 
-                // 下半部：台词展示与交互区
+                // 下半部：台词展示与交互区（暖色暗底）
                 ZStack {
-                    Color(UIColor.systemBackground)
+                    Color(red: 0.12, green: 0.06, blue: 0.18)  // 深紫黑底
                     
                     VStack {
                         ScrollView {
                             Text(radioManager.currentScript.isEmpty ? "电台待命中...\n点击下方按钮获取沿途风光播报。" : radioManager.currentScript)
                                 .font(.body)
+                                .foregroundColor(.white.opacity(0.9))
                                 .lineSpacing(8)
                                 .multilineTextAlignment(.center)
                                 .padding()
                                 .frame(maxWidth: .infinity)
                         }
-                        .background(Color.gray.opacity(0.1))
+                        .background(Color.white.opacity(0.08))
                         .cornerRadius(15)
                         .padding()
                         
@@ -758,9 +764,10 @@ struct ContentView: View {
                         VStack(spacing: 8) {
                             HStack {
                                 Text("播报频率")
+                                    .foregroundColor(.white.opacity(0.7))
                                 Spacer()
                                 Text(broadcastFrequencyDescription(frequency: radioManager.broadcastFrequency))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.white.opacity(0.5))
                             }
                             Slider(value: Binding(get: {
                                 Double(radioManager.broadcastFrequency)
