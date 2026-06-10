@@ -180,7 +180,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     /// 根据当前频率和 POI 权重自动决定是否触发播报
     private func triggerAutoBroadcastIfNeeded() {
-        guard !isPlaying else { return }
+        guard !isPlaying && !isLoading else { return }  // 正在播报或加载中，不打断
         // 动态冷却：速度越慢间隔越长（低速时 POI 不轻易变化）
         let cooldown: TimeInterval = displaySpeedKmh > 60 ? 90 : (displaySpeedKmh > 30 ? 150 : 240)
         guard Date().timeIntervalSince(lastAutoBroadcastTime) >= cooldown else { return }
