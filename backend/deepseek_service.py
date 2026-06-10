@@ -39,16 +39,7 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
             {"role": "system", "content": DEEPSEEK_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
         ],
-        "response_format": {"type": "json_object"},
-        "tools": [
-            {
-                "type": "web_search",
-                "web_search": {
-                    "search_result_format": "text",
-                    "enable": True
-                }
-            }
-        ]
+        "response_format": {"type": "json_object"}
     }
     
     # 💡 绝对防御：直接将中文字典转为纯 UTF-8 字节流，杜绝系统 ASCII 隐式转码崩溃
