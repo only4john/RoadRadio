@@ -34,7 +34,7 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
     
     # 构建请求（联网搜索模式：让 DeepSeek 自动查资料减少幻觉）
     request_body = {
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-flash",
         "messages": [
             {"role": "system", "content": DEEPSEEK_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
@@ -135,7 +135,7 @@ async def select_best_landmark(candidates: list) -> dict:
 只返回严格 JSON：{{"index": 数字, "name": "POI名称", "reason": "一句话理由"}}"""
 
     request_body = {
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-flash",
         "messages": [
             {"role": "system", "content": "你是一个旅行家，擅长挑选最有故事的地标。只输出 JSON。"},
             {"role": "user", "content": prompt}

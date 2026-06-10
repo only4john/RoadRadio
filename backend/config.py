@@ -14,7 +14,7 @@ load_dotenv()
 AMAP_API_KEY = os.getenv("AMAP_API_KEY", "1bf4810688b1f136dd5e5d16ea67b587")
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-a3664d2ba5864986b65efffc59503bef")
-DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
+DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions")
 DEEPSEEK_REQUEST_TIMEOUT = float(os.getenv("DEEPSEEK_TIMEOUT", "30.0"))
 
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "sk-cp-9Xyei5hLBF7dh3dHKZZA1p-YKOYWCHV2NVzns3-_9Frjwx4XGrkdr8wuSXrZtEQCtQBAWR-PcKNJL8_s6hH4rphP2lSS53z08m4p7_wiDSQGmx5YeI95FWM")
