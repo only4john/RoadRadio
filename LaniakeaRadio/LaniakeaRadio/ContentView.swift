@@ -656,7 +656,7 @@ struct ContentView: View {
                             .foregroundColor(.white)
                             .symbolEffect(.bounce, value: radioManager.isPlaying)
                         
-                        Text("一路聊吧")
+                        Text("道听途说")
                             .font(.headline)
                             .foregroundColor(.gray)
                         
