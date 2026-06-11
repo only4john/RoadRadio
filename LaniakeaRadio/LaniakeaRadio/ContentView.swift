@@ -151,23 +151,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             self.latitude = lat
             self.longitude = lon
             self.speedKmh = Int(max(0, loc.speed) * 3.6)
-            // 📐 指数移动平均平滑，正确处理 0°/360° 边界
-            if loc.course >= 0 {
-                let raw = loc.course
-                if !self.headingInitialized {
-                    self.smoothedHeading = raw
-                    self.headingInitialized = true
-                } else {
-                    // 处理角度环绕：如果差值>180°，走"短路径"
-                    var diff = raw - self.smoothedHeading
-                    while diff > 180 { diff -= 360 }
-                    while diff < -180 { diff += 360 }
-                    self.smoothedHeading = (self.smoothedHeading + 0.3 * diff)
-                        .truncatingRemainder(dividingBy: 360)
-                    if self.smoothedHeading < 0 { self.smoothedHeading += 360 }
-                }
-                self.headingDeg = Int(self.smoothedHeading)
-            }
+            // 方向不从这里取，完全由陀螺仪提供
         }
         // GPS 首次定位后立刻获取天气（用 loc 原始坐标，不依赖 self.latitude 异步赋值）
         if !didFetchInitialWeather {
@@ -217,13 +201,21 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
         DispatchQueue.main.async {
-            let rawHeading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
-            // GPS 方向优先，陀螺仪只在 GPS 未初始化时作为初始值
+            let raw = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+            // 纯陀螺仪方向 + 移动平均平滑
             if !self.headingInitialized {
-                self.smoothedHeading = rawHeading
+                self.smoothedHeading = raw
                 self.headingInitialized = true
-                self.headingDeg = Int(rawHeading)
+            } else {
+                let alpha = 0.15  // 陀螺仪本身较稳，用小平滑系数
+                var diff = raw - self.smoothedHeading
+                while diff > 180 { diff -= 360 }
+                while diff < -180 { diff += 360 }
+                self.smoothedHeading = (self.smoothedHeading + alpha * diff)
+                    .truncatingRemainder(dividingBy: 360)
+                if self.smoothedHeading < 0 { self.smoothedHeading += 360 }
             }
+            self.headingDeg = Int(self.smoothedHeading)
         }
     }
     
