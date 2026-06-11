@@ -176,8 +176,8 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
     When speed is very low, heading is unreliable — treat all POIs as 'ahead'.
     Otherwise use a ±60° tolerance (front 120°).
     """
-    # heading 在静止/低速时不可靠，此时不按方向过滤
-    if speed_kmh < 5.0:
+    # 只有速度极低（几乎静止）且 heading 噪声大时才放宽
+    if speed_kmh < 2.0:
         return True
 
     heading_tolerance = 30  # ±30°，即前方 60° 扇形
