@@ -66,7 +66,7 @@ CONTENT_HINTS = [
 ]
 
 
-def build_radio_prompt(payload) -> str:
+def build_radio_prompt(payload, cached_knowledge: str = "") -> str:
     """动态构建电台播报 prompt，随机选取信息元素、对话风格和内容方向"""
     import random
 
@@ -117,8 +117,13 @@ def build_radio_prompt(payload) -> str:
 
     # ─── 5. 拼接 prompt ───
     info_block = "\n".join(f"- {e}" for e in selected) if selected else "（仅关注前方地标）"
+    
+    # 如果有缓存的知识文本，直接注入 prompt，无需联网搜索
+    knowledge_block = ""
+    if cached_knowledge:
+        knowledge_block = f"\n\n📚 已知资料（基于此进行介绍，不要编造）：\n{cached_knowledge}"
 
-    return f"""前方即将经过或处于【{payload.poi_name}】。
+    return f"""前方即将经过或处于【{payload.poi_name}】。{knowledge_block}
 
 当前环境信息：
 {info_block}

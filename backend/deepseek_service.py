@@ -12,11 +12,12 @@ from config import (
     DEEPSEEK_SYSTEM_PROMPT,
     build_radio_prompt,
 )
+from poi_knowledge import get_knowledge, save_knowledge
 
 
 async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
     """
-    调用 DeepSeek 生成电台剧本
+    调用 DeepSeek 生成电台剧本，优先使用 POI 知识库缓存
     
     Args:
         payload: 实时位置和环境信息
@@ -28,9 +29,24 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
         Exception: DeepSeek 请求失败
     """
     print("🧠 正在呼叫 DeepSeek 编写剧本...")
+
+    # ─── 🚀 查 POI 知识库 ───
+    cached = get_knowledge(
+        payload.poi_name,
+        province=payload.province,
+        city=payload.city
+    )
     
+    if cached:
+        print(f"📚 命中 POI 知识库缓存！{payload.province}{payload.city} {payload.poi_name} ({len(cached)} 字)")
+        # 有缓存 → 不联网搜索，省 token
+        enable_search = False
+    else:
+        print(f"🆕 首次查询 {payload.poi_name}，启用联网搜索")
+        enable_search = True
+
     # 动态生成用户提示词（随机选取元素、风格、气氛、内容方向）
-    user_prompt = build_radio_prompt(payload)
+    user_prompt = build_radio_prompt(payload, cached_knowledge=cached)
     
     # 构建请求（联网搜索模式：让 DeepSeek 自动查资料减少幻觉）
     request_body = {
@@ -40,7 +56,7 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
             {"role": "user", "content": user_prompt}
         ],
         "response_format": {"type": "json_object"},
-        "enable_search": True
+        "enable_search": enable_search
     }
     
     # 💡 绝对防御：直接将中文字典转为纯 UTF-8 字节流，杜绝系统 ASCII 隐式转码崩溃
@@ -96,6 +112,23 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
 
             dialogue_list = script_data.get('dialogue', [])
             
+            # 💾 把搜索结果存入 POI 知识库（下次不重复搜索）
+            if enable_search and search_results:
+                combined = "\n\n".join([
+                    f"[{sr.get('title', '?')}]\n{sr.get('snippet', sr.get('content', ''))}"
+                    for sr in search_results
+                ])
+                if combined.strip():
+                    save_knowledge(
+                        poi_name=payload.poi_name,
+                        knowledge_text=combined,
+                        province=payload.province,
+                        city=payload.city,
+                        district=payload.district,
+                        latitude=payload.lat,
+                        longitude=payload.lon
+                    )
+            
             print("✅ 剧本生成成功！")
             return dialogue_list
             
@@ -131,6 +164,7 @@ async def select_best_landmark(candidates: list) -> dict:
 - 知名度和趣味性
 - 是否有故事可讲
 - 距离适中（太远的不优先）
+- 避免商业设施（如加油站、便利店、药店等），除非它们有特别的历史或文化意义。
 
 只返回严格 JSON：{{"index": 数字, "name": "POI名称", "reason": "一句话理由"}}"""
 
