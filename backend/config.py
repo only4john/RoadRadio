@@ -47,7 +47,7 @@ AUDIO_SETTINGS = {
 # ==========================================
 # 🎭 DeepSeek 剧本配置
 # ==========================================
-DEEPSEEK_SYSTEM_PROMPT = "你是一个王牌车载电台的编剧，A叫阿甘（清爽男声），B叫珍妮（活泼女声）。他们是一对默契的电台搭档。你的任务是输出他们之间的对话，只输出严格 JSON 格式，不要任何多余解释。"""
+DEEPSEEK_SYSTEM_PROMPT = "你是一个王牌车载电台的编剧，A（清爽男声），B（活泼女声）。他们是一对默契的电台搭档，A有点喜欢B，B是否喜欢A则有点捉摸不透。你的任务是输出他们之间的对话，只输出严格 JSON 格式，不要任何多余解释。"""
 
 STYLE_POOL = [
     ("两人像老朋友一样轻松聊天，相互应和", "语气舒缓放松，像午后电台"),
@@ -62,6 +62,7 @@ CONTENT_HINTS = [
     "可以从文化衍生的角度聊聊这里的独特之处",
     "分享一个跟这个地标相关的轶事或八卦",
     "说一个关于这里的冷知识或有趣的细节",
+    "总结一下网上搜索到的关于这里的评论",
 ]
 
 
@@ -96,7 +97,7 @@ def build_radio_prompt(payload) -> str:
         num_extras = 0
     elif roll < 0.75:
         num_extras = 1
-    elif roll < 0.95:
+    elif roll < 0.90:
         num_extras = 2
     else:
         num_extras = min(3, len(elements))
@@ -111,8 +112,8 @@ def build_radio_prompt(payload) -> str:
     music_comment = ""
     music_selected = any("播放" in e for e in selected)
     if music_selected and random.random() < 0.3:
-        music_comment = ("如果提到了音乐，可以顺便简单评论一下这位歌手/艺术家的风格或近况，"
-                         "自然地一带而过，不用太长。")
+        music_comment = ("如果提到了音乐，可以顺便简单评论一下这位歌手/艺术家的风格,历史轶事，或近况，"
+                         "以及粉丝们对这位艺术家的公论，历史地位等等。")
 
     # ─── 5. 拼接 prompt ───
     info_block = "\n".join(f"- {e}" for e in selected) if selected else "（仅关注前方地标）"
@@ -126,24 +127,9 @@ def build_radio_prompt(payload) -> str:
 整体气氛：{atmosphere}
 内容提示：{hint}
 {music_comment}
-请生成 2到3 轮自然、有沉浸感的电台双人对话。要求：
+请生成 1到3 轮自然、有沉浸感的电台双人对话。要求：
 1. 必须围绕【{payload.poi_name}】展开，这是最核心的话题。
 2. 基于真实信息进行介绍，不要编造不存在的事实、人物、年代或数据。你知道多少就说多少，不知道的宁可不提。
 3. 如果提供了环境信息，自然地融入对话中，不要生硬堆砌每一行。
-4. 像公路旅行中的朋友聊天，轻松不做作，不要像导游词。
+4. 像公路旅行中的朋友聊天，轻松不做作，不要像导游词。话题可以开放和发散，但要有回归地标的意识，保持对话的相关性和连贯性。
 5. 返回强制严格 JSON 格式：{{"dialogue": [{{"role": "A", "text": "内容"}}, {{"role": "B", "text": "内容"}}]}}"""
-
-
-# 旧模板保留兼容（不再使用，由 build_radio_prompt 替代）
-DEEPSEEK_USER_PROMPT_TEMPLATE = """
-当前时间是{time_of_day}，天气{weather}，气温{temperature}度。
-我们正以 {speed_kmh} km/h 的车速行驶，前方即将经过或处于【{poi_name}】。
-车内正在播放音乐《{current_music}》。
-
-请结合当前的环境氛围、天气感受以及前方的具体地标，生成 2到3 轮自然、舒缓的电台双人对话。
-要求：
-1. 像老朋友在公路旅行一样聊天，带出一种在路上的沉浸感。
-2. 有小概率自然地提到车窗外的温度或天气，并对即将到达的地标或正在听的歌表示期待和共鸣。
-3. 如果有即将到来的地标，可以简要介绍一下这个地标的特色或历史，最好是相关轶事，不要过于正式，保持轻松的语气。
-4. 返回强制严格 JSON 格式：{{"dialogue": [{{"role": "A", "text": "内容"}}, {{"role": "B", "text": "内容"}}]}}
-"""
