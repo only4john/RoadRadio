@@ -51,9 +51,9 @@ def wgs84_to_gcj02(lat: float, lon: float) -> tuple[float, float]:
 
 def normalize_search_radius(speed_kmh: float) -> int:
     if speed_kmh <= 0:
-        return 500  # 静止时 500m，确保室内也能找到附近 POI
+        return 100  # 静止时 100m
     elif speed_kmh <= 30:
-        return 500
+        return 300  # 低速时 300m
     elif speed_kmh <= 70:
         return 800
     elif speed_kmh <= 100:
