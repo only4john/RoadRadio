@@ -99,7 +99,8 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     private func setupLocation() {
         locationManager.delegate = self
-        locationManager.requestWhenInUseAuthorization()
+        locationManager.requestAlwaysAuthorization()  // 后台定位需要 Always
+        locationManager.allowsBackgroundLocationUpdates = true  // 允许后台 GPS
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = 50  // 每 50 米更新一次
         if CLLocationManager.headingAvailable() {
