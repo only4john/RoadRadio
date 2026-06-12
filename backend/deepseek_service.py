@@ -125,7 +125,7 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
                     )
             
             print("✅ 剧本生成成功！")
-            return dialogue_list
+            return dialogue_list, used_search
             
         except Exception as e:
             print(f"❌ DeepSeek 请求失败: {e}")
