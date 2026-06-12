@@ -25,6 +25,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @Published var headingDeg: Int = 0
     private var smoothedHeading: Double = 0
     private var headingInitialized = false
+    private let rotationToNorth: Double = 0  // 将来可用于动态校正
     @Published var isLoading: Bool = false
     @Published var selectedPOIName: String = ""
     @Published var broadcastFrequency: Int = 50 // 0 = 最低，只播著名景点；100 = 最高，频繁播报
@@ -203,13 +204,28 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
         DispatchQueue.main.async {
-            let raw = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
-            // 纯陀螺仪方向 + 移动平均平滑
+            var raw = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+            
+            // 根据设备方向修正：用户始终面朝摄像头=前方
+            let orientation = UIDevice.current.orientation
+            switch orientation {
+            case .landscapeLeft:
+                raw = (raw + 90).truncatingRemainder(dividingBy: 360)  // 左横屏：顶在左，摄像头朝右→前方=北+90°
+            case .landscapeRight:
+                raw = (raw - 90).truncatingRemainder(dividingBy: 360)  // 右横屏：顶在右，摄像头朝左→前方=北-90°
+            case .portraitUpsideDown:
+                raw = (raw + 180).truncatingRemainder(dividingBy: 360) // 倒竖屏
+            default:
+                break  // 正常竖屏，无需修正
+            }
+            if raw < 0 { raw += 360 }
+            
+            // EMA 平滑
             if !self.headingInitialized {
                 self.smoothedHeading = raw
                 self.headingInitialized = true
             } else {
-                let alpha = 0.15  // 陀螺仪本身较稳，用小平滑系数
+                let alpha = 0.15
                 var diff = raw - self.smoothedHeading
                 while diff > 180 { diff -= 360 }
                 while diff < -180 { diff += 360 }
