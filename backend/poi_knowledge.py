@@ -17,11 +17,11 @@ def _ensure_db():
             province TEXT DEFAULT '',
             city TEXT DEFAULT '',
             district TEXT DEFAULT '',
-            latitude REAL DEFAULT 0,
-            longitude REAL DEFAULT 0,
+            lat_int INTEGER DEFAULT 0,
+            lon_int INTEGER DEFAULT 0,
             knowledge_text TEXT DEFAULT '',
             created_at TEXT DEFAULT '',
-            PRIMARY KEY (poi_name, province, city)
+            PRIMARY KEY (poi_name, province, city, lat_int, lon_int)
         )
         """
     )
@@ -29,21 +29,39 @@ def _ensure_db():
     conn.close()
 
 
-def get_knowledge(poi_name: str, province: str = "", city: str = "") -> str | None:
-    """查询 POI 知识库，返回缓存的文本，没有则返回 None"""
+def get_knowledge(poi_name: str, province: str = "", city: str = "",
+                  lat: float = 0, lon: float = 0) -> str | None:
+    """查询 POI 知识库，先按名+省市+粗坐标匹配，再模糊回退"""
     _ensure_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    # 先精确匹配
+    
+    lat_int = int(round(lat * 1000)) if lat else 0   # 0.001° ≈ 111m
+    lon_int = int(round(lon * 1000)) if lon else 0
+    
+    # 精确匹配：名字 + 省市 + 粗坐标 ±1（约 100m 范围）
     cursor.execute(
-        "SELECT knowledge_text FROM poi_knowledge WHERE poi_name = ? AND province = ? AND city = ?",
-        (poi_name, province, city)
+        """SELECT knowledge_text FROM poi_knowledge 
+           WHERE poi_name = ? AND province = ? AND city = ?
+           AND ABS(lat_int - ?) <= 1 AND ABS(lon_int - ?) <= 1""",
+        (poi_name, province, city, lat_int, lon_int)
     )
     row = cursor.fetchone()
     if row and row[0]:
         conn.close()
         return row[0]
-    # 回退：只按 poi_name 查
+    
+    # 回退1：名字 + 城市（不含区）
+    cursor.execute(
+        "SELECT knowledge_text FROM poi_knowledge WHERE poi_name = ? AND city = ? ORDER BY created_at DESC LIMIT 1",
+        (poi_name, city)
+    )
+    row = cursor.fetchone()
+    if row and row[0]:
+        conn.close()
+        return row[0]
+    
+    # 回退2：只按名字
     cursor.execute(
         "SELECT knowledge_text FROM poi_knowledge WHERE poi_name = ? ORDER BY created_at DESC LIMIT 1",
         (poi_name,)

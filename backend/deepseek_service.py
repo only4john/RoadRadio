@@ -28,7 +28,9 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
     cached = get_knowledge(
         payload.poi_name,
         province=payload.province,
-        city=payload.city
+        city=payload.city,
+        lat=payload.lat,
+        lon=payload.lon
     )
     
     if cached:
