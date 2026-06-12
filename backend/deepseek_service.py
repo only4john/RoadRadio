@@ -15,18 +15,12 @@ from config import (
 from poi_knowledge import get_knowledge, save_knowledge
 
 
-async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
+async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list, bool]:
     """
     调用 DeepSeek 生成电台剧本，优先使用 POI 知识库缓存
     
-    Args:
-        payload: 实时位置和环境信息
-        
     Returns:
-        dialogue_list: 对话列表，每个元素为 {"role": "A" or "B", "text": "..."}
-        
-    Raises:
-        Exception: DeepSeek 请求失败
+        (dialogue_list, used_search): 对话列表 + 是否使用了联网搜索
     """
     print("🧠 正在呼叫 DeepSeek 编写剧本...")
 
@@ -39,12 +33,12 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
     
     if cached:
         print(f"📚 命中 POI 知识库缓存！{payload.province}{payload.city} {payload.poi_name} ({len(cached)} 字)")
+        used_search = False
         enable_search = False
     else:
-        print(f"🆕 首次查询 {payload.poi_name}，先搜索再写剧本")
-        # 第一步：单独搜索收集资料，不写剧本
-        cached = await _search_and_cache(payload)
-        enable_search = False  # 已缓存，不再搜
+        print(f"🆕 首次查询 {payload.poi_name}，启用联网搜索")
+        used_search = True
+        enable_search = True
 
     # 动态生成用户提示词（随机选取元素、风格、气氛、内容方向）
     user_prompt = build_radio_prompt(payload, cached_knowledge=cached)

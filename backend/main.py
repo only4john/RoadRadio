@@ -71,8 +71,8 @@ async def generate_radio(payload: RealTimeLocationPayload):
     print(f"[🚀 收到前端请求] 车速: {payload.speed_kmh}km/h | 音乐: {payload.current_music} | POI: {payload.poi_name}")
     
     try:
-        # 第一步：生成剧本
-        dialogue_list = await generate_radio_script(payload)
+        # 第一步：生成剧本（同时返回是否用了联网搜索）
+        dialogue_list, used_search = await generate_radio_script(payload)
         
         # 第二步：合成音频
         audio_buffer = await synthesize_audio(dialogue_list)
@@ -81,7 +81,7 @@ async def generate_radio(payload: RealTimeLocationPayload):
         print(f"❌ 电台生成失败: {e}")
         return Response(status_code=500, content="Failed to generate radio")
     
-    # 第三步：打包返回 (字幕 + 二进制音频)
+    # 第三步：打包返回 (字幕 + 二进制音频 + 搜索标签)
     full_text = "\n\n".join([f"{item['role']}: {item['text']}" for item in dialogue_list])
     encoded_script = urllib.parse.quote(full_text)
 
@@ -89,6 +89,7 @@ async def generate_radio(payload: RealTimeLocationPayload):
         content=bytes(audio_buffer),
         media_type="audio/mpeg",
         headers={
-            "X-Radio-Script": encoded_script
+            "X-Radio-Script": encoded_script,
+            "X-Radio-Search": "1" if used_search else "0",
         }
     )

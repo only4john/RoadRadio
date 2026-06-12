@@ -37,6 +37,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @Published var bgmEnabled: Bool = false
     @Published var candidatePOIs: [[String: Any]] = []
     @Published var deepseekReason: String = ""   // DeepSeek 选择理由
+    @Published var usedWebSearch: Bool = false   // 本次播报是否使用了联网搜索
 
     // 自动播报冷却
     private var lastAutoBroadcastTime: Date = .distantPast
@@ -385,6 +386,11 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
                     self.currentScript = decodedScript
                 }
             }
+            if let searchFlag = httpResponse.value(forHTTPHeaderField: "X-Radio-Search") {
+                DispatchQueue.main.async {
+                    self.usedWebSearch = (searchFlag == "1")
+                }
+            }
             
             DispatchQueue.main.async {
                 do {
@@ -674,8 +680,8 @@ struct ContentView: View {
                         
                         if !radioManager.currentMusicName.isEmpty && radioManager.currentMusicName != "无" {
                             Text("🎵 \(radioManager.currentMusicName)")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.5))
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.8))
                         }
 
                         // BGM 开关
