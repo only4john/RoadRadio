@@ -39,11 +39,12 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> list:
     
     if cached:
         print(f"📚 命中 POI 知识库缓存！{payload.province}{payload.city} {payload.poi_name} ({len(cached)} 字)")
-        # 有缓存 → 不联网搜索，省 token
         enable_search = False
     else:
-        print(f"🆕 首次查询 {payload.poi_name}，启用联网搜索")
-        enable_search = True
+        print(f"🆕 首次查询 {payload.poi_name}，先搜索再写剧本")
+        # 第一步：单独搜索收集资料，不写剧本
+        cached = await _search_and_cache(payload)
+        enable_search = False  # 已缓存，不再搜
 
     # 动态生成用户提示词（随机选取元素、风格、气氛、内容方向）
     user_prompt = build_radio_prompt(payload, cached_knowledge=cached)
@@ -216,3 +217,76 @@ async def select_best_landmark(candidates: list) -> dict:
     fallback = dict(candidates[0])
     fallback["_selection_reason"] = "（回退选择）"
     return fallback
+
+
+async def _search_and_cache(payload: RealTimeLocationPayload) -> str:
+    """单独做一次联网搜索，把结果存入知识库，返回知识文本"""
+    import asyncio
+    print(f"🔍 正在为 {payload.poi_name} 执行独立联网搜索...")
+    
+    search_prompt = f"""请联网搜索关于「{payload.poi_name}」的信息（位于{payload.province}{payload.city}{payload.district}），
+整理 3-5 条关键资料，每条包含标题和内容摘要。输出纯 JSON：{{"results": [{{"title": "...", "snippet": "..."}}]}}"""
+    
+    request_body = {
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {"role": "system", "content": "你是一个旅行资料收集助手，只输出 JSON。"},
+            {"role": "user", "content": search_prompt}
+        ],
+        "response_format": {"type": "json_object"},
+        "enable_search": True
+    }
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.post(
+                DEEPSEEK_API_URL,
+                headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
+                content=json.dumps(request_body, ensure_ascii=False).encode('utf-8')
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            # 提取搜索结果
+            msg = data["choices"][0].get("message", {})
+            search_results = msg.get("search_results", [])
+            content = data["choices"][0]["message"]["content"]
+            
+            if search_results:
+                print(f"🌐 搜索到 {len(search_results)} 条资料")
+                combined = "\n\n".join([
+                    f"[{s.get('title', '?')}]\n{s.get('snippet', s.get('content', ''))}"
+                    for s in search_results
+                ])
+            else:
+                # 没触发搜索，用模型自己的回答作为资料
+                try:
+                    parsed = json.loads(content)
+                    results = parsed.get("results", [])
+                    if results:
+                        combined = "\n\n".join([
+                            f"[{r.get('title', '?')}]\n{r.get('snippet', '')}"
+                            for r in results
+                        ])
+                    else:
+                        combined = content
+                except:
+                    combined = content
+                print(f"⚠️ 未触发联网搜索，用模型知识替代")
+            
+            if combined.strip():
+                save_knowledge(
+                    poi_name=payload.poi_name,
+                    knowledge_text=combined,
+                    province=payload.province,
+                    city=payload.city,
+                    district=payload.district,
+                    latitude=payload.lat,
+                    longitude=payload.lon
+                )
+            
+            return combined
+            
+        except Exception as e:
+            print(f"❌ 独立搜索失败: {e}")
+            return ""
