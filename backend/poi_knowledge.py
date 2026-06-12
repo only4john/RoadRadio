@@ -36,8 +36,8 @@ def get_knowledge(poi_name: str, province: str = "", city: str = "",
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    lat_int = int(round(lat * 1000)) if lat else 0   # 0.001° ≈ 111m
-    lon_int = int(round(lon * 1000)) if lon else 0
+    lat_int = int(round(lat * 10)) if lat else 0    # 保留1位小数, ±0.05° ≈ 5.5km
+    lon_int = int(round(lon * 10)) if lon else 0
     
     # 精确匹配：名字 + 省市 + 粗坐标 ±1（约 100m 范围）
     cursor.execute(
@@ -78,11 +78,13 @@ def save_knowledge(poi_name: str, knowledge_text: str,
     _ensure_db()
     now = datetime.utcnow().isoformat()
     conn = sqlite3.connect(DB_PATH)
+    lat_int = int(round(latitude * 10)) if latitude else 0
+    lon_int = int(round(longitude * 10)) if longitude else 0
     conn.execute(
         """INSERT OR REPLACE INTO poi_knowledge 
-           (poi_name, province, city, district, latitude, longitude, knowledge_text, created_at)
+           (poi_name, province, city, district, lat_int, lon_int, knowledge_text, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (poi_name, province, city, district, latitude, longitude, knowledge_text, now)
+        (poi_name, province, city, district, lat_int, lon_int, knowledge_text, now)
     )
     conn.commit()
     conn.close()
