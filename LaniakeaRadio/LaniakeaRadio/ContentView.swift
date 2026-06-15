@@ -11,6 +11,62 @@ import MediaPlayer
 let serverBaseURL = "http://49.51.247.112:8000"
 
 // ==========================================
+// 📦 类型安全的 POI 数据结构（替代 [String: Any] 字典）
+// ==========================================
+struct POIInfo {
+    let poi_id: String
+    let name: String
+    let type: String
+    let typecode: String
+    let address: String
+    let distance_m: Int
+    let location: String
+    let rating: Double
+    let province: String
+    let city: String
+    let district: String
+    let is_ahead: Bool
+    let introduced_count: Int
+    let selection_weight: Double
+    
+    init(from raw: RawPOICandidate) {
+        self.poi_id = raw.poi_id
+        self.name = raw.name
+        self.type = raw.type
+        self.typecode = raw.typecode
+        self.address = raw.address
+        self.distance_m = raw.distance_m
+        self.location = raw.location
+        self.rating = raw.rating
+        self.province = raw.province
+        self.city = raw.city
+        self.district = raw.district
+        self.is_ahead = raw.is_ahead ?? true
+        self.introduced_count = raw.introduced_count ?? 0
+        self.selection_weight = raw.selection_weight ?? 0.0
+    }
+    
+    init?(from dict: [String: Any]) {
+        guard let poi_id = dict["poi_id"] as? String,
+              let name = dict["name"] as? String else { return nil }
+        self.poi_id = poi_id
+        self.name = name
+        self.type = dict["type"] as? String ?? ""
+        self.typecode = dict["typecode"] as? String ?? ""
+        self.address = dict["address"] as? String ?? ""
+        self.distance_m = dict["distance_m"] as? Int ?? 0
+        self.location = dict["location"] as? String ?? ""
+        self.rating = dict["rating"] as? Double ?? 0.0
+        self.province = dict["province"] as? String ?? ""
+        self.city = dict["city"] as? String ?? ""
+        self.district = dict["district"] as? String ?? ""
+        self.is_ahead = dict["is_ahead"] as? Bool ?? true
+        self.introduced_count = dict["introduced_count"] as? Int ?? 0
+        self.selection_weight = dict["selection_weight"] as? Double ?? 0.0
+    }
+}
+
+// ==========================================
 // 1. 后台大管家：双播放器架构（BGM + 人声）
 // ==========================================
 class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocationManagerDelegate {
@@ -36,7 +92,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @Published var currentArtist: String = ""
     @Published var generatedAudioFilename: String = ""
     @Published var bgmEnabled: Bool = false
-    @Published var candidatePOIs: [[String: Any]] = []
+    @Published var candidatePOIs: [POIInfo] = []
     @Published var deepseekReason: String = ""   // DeepSeek 选择理由
     @Published var usedWebSearch: Bool = false   // 本次播报是否使用了联网搜索
 
@@ -50,8 +106,8 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @Published var simulatedSpeedKmh: Int = 70
     @Published var simulatedHeadingDeg: Int = 0
 
-    // 简化的已选 POI 信息
-    private var selectedPOI: [String: Any]? = nil
+    // 当前已选 POI（类型安全）
+    private var selectedPOI: POIInfo? = nil
 
     var displayLatitude: Double {
         #if targetEnvironment(simulator)
@@ -184,20 +240,18 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         Task {
             await fetchAndSelectPOI()
             guard let poi = selectedPOI,
-                  let weight = poi["selection_weight"] as? Double,
-                  weight >= threshold else { return }
+                  poi.selection_weight >= threshold else { return }
 
             // 避免重复播报同一个 POI
-            let poiId = poi["poi_id"] as? String ?? ""
-            if poiId == lastAutoBroadcastPOIId {
-                print("⏭️ 跳过重复 POI: \(poi["name"] ?? "?")")
+            if poi.poi_id == lastAutoBroadcastPOIId {
+                print("⏭️ 跳过重复 POI: \(poi.name)")
                 DispatchQueue.main.async { self.currentScript = "" }
                 return
             }
 
             lastAutoBroadcastTime = Date()
-            lastAutoBroadcastPOIId = poiId
-            print("🚗 自动播报触发！POI: \(poi["name"] ?? "?") 权重: \(weight)")
+            lastAutoBroadcastPOIId = poi.poi_id
+            print("🚗 自动播报触发！POI: \(poi.name) 权重: \(poi.selection_weight)")
             await generateAndPlayRadio(speed: displaySpeedKmh, music: currentMusicName, prefetchedPOI: poi)
         }
     }
@@ -340,7 +394,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         }
     }
     
-    func generateAndPlayRadio(speed: Int, music: String, prefetchedPOI: [String: Any]? = nil) async {
+    func generateAndPlayRadio(speed: Int, music: String, prefetchedPOI: POIInfo? = nil) async {
         // auto-broadcast 已有 POI，不要再查；手动按钮才查
         if let poi = prefetchedPOI {
             self.selectedPOI = poi
@@ -349,7 +403,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         }
 
         // 无可用 POI 时跳过播报
-        guard let poi = selectedPOI, let _ = poi["name"] as? String else {
+        guard let poi = selectedPOI else {
             print("⏭️ 无可播报 POI，跳过")
             DispatchQueue.main.async {
                 self.isLoading = false
@@ -367,10 +421,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        var poiName = ""
-        if let poi = selectedPOI, let name = poi["name"] as? String {
-            poiName = name
-        }
+        let poiName = selectedPOI?.name ?? ""
 
         let payload: [String: Any] = [
                     "lat": self.displayLatitude,
@@ -381,9 +432,9 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
                     "current_music": music,
                     "artist": currentArtist,
                     "poi_name": poiName,
-                    "province": selectedPOI?["province"] as? String ?? "",
-                    "city": selectedPOI?["city"] as? String ?? "",
-                    "district": selectedPOI?["district"] as? String ?? "",
+                    "province": selectedPOI?.province ?? "",
+                    "city": selectedPOI?.city ?? "",
+                    "district": selectedPOI?.district ?? "",
                     "frequency_level": broadcastFrequency,
                     "weather": weatherDescription,
                     "temperature": temperature,
@@ -444,12 +495,15 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        // 将本地历史一起交给后端，后端会算 frequency_weight
+        let history = LandmarkHistoryManager.shared.allHistory()
         let body: [String: Any] = [
             "lat": displayLatitude,
             "lon": displayLongitude,
             "speed_kmh": displaySpeedKmh,
             "heading": displayHeadingDeg,
-            "max_results": 10
+            "max_results": 10,
+            "introduced_poi_ids": history
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
@@ -511,16 +565,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         let filtered = filterByLocalHistory(candidates)
         
         DispatchQueue.main.async {
-            let history = LandmarkHistoryManager.shared.allHistory()
-            self.candidatePOIs = candidates.map { poi in
-                ["name": poi.name, "distance_m": poi.distance_m,
-                 "type": poi.type, "poi_id": poi.poi_id,
-                 "location": poi.location, "province": poi.province,
-                 "city": poi.city, "district": poi.district,
-                 "address": poi.address,
-                 "rating": poi.rating,
-                 "introduced_count": history[poi.poi_id] ?? 0]
-            }
+            self.candidatePOIs = candidates.map(POIInfo.init)
         }
         
         let (best, reason) = await selectBestLandmark(from: filtered)
@@ -529,18 +574,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
             return
         }
         
-        self.selectedPOI = [
-            "poi_id": best.poi_id,
-            "name": best.name,
-            "type": best.type,
-            "address": best.address,
-            "location": best.location,
-            "distance_m": best.distance_m,
-            "province": best.province,
-            "city": best.city,
-            "district": best.district,
-            "selection_weight": 1.0  // 经本地过滤+DeepSeek选中的，权重设为 1.0
-        ]
+        self.selectedPOI = POIInfo(from: best)
         DispatchQueue.main.async {
             self.currentScript = "准备播报：\(best.name)"
             self.selectedPOIName = best.name
@@ -617,10 +651,10 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     // 播放结束时记录介绍
     private func recordLandmarkIntro() {
-        guard let poi = selectedPOI, let poi_id = poi["poi_id"] as? String, let name = poi["name"] as? String, let location = poi["location"] as? String else { return }
+        guard let poi = selectedPOI else { return }
         
         // ✅ 客户端本地写入（核心：每人独立历史）
-        LandmarkHistoryManager.shared.recordIntroduction(poiId: poi_id)
+        LandmarkHistoryManager.shared.recordIntroduction(poiId: poi.poi_id)
         
         // 服务器同步记录（可选，用于统计分析）
         guard let url = URL(string: "\(serverBaseURL)/record-landmark") else { return }
@@ -629,11 +663,11 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let payload: [String: Any] = [
-            "poi_id": poi_id,
-            "name": name,
-            "location": location,
-            "address": poi["address"] as? String ?? "",
-            "type": poi["type"] as? String ?? ""
+            "poi_id": poi.poi_id,
+            "name": poi.name,
+            "location": poi.location,
+            "address": poi.address,
+            "type": poi.type
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
 
@@ -642,7 +676,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
                 print("❌ recordLandmarkIntro failed: \(error)")
                 return
             }
-            print("✅ recordLandmarkIntro succeeded for \(poi_id)")
+            print("✅ recordLandmarkIntro succeeded for \(poi.poi_id)")
         }.resume()
     }
 }
@@ -748,19 +782,13 @@ struct ContentView: View {
                                     VStack(alignment: .leading, spacing: 4) {
                                         ForEach(radioManager.candidatePOIs.indices, id: \.self) { idx in
                                             let poi = radioManager.candidatePOIs[idx]
-                                            let name = poi["name"] as? String ?? "?"
-                                            let dist = poi["distance_m"] as? Int ?? 0
-                                            let type = poi["type"] as? String ?? ""
-                                            let weight = poi["selection_weight"] as? Double ?? 0
-                                            let rating = poi["rating"] as? Double ?? 0
-                                            let count = poi["introduced_count"] as? Int ?? 0
-                                            let isSelected = (poi["name"] as? String) == radioManager.selectedPOIName
+                                            let isSelected = poi.name == radioManager.selectedPOIName
                                             
                                             VStack(alignment: .leading, spacing: 1) {
-                                                Text("\(name)  \(dist)m")
+                                                Text("\(poi.name)  \(poi.distance_m)m")
                                                     .font(.system(size: 11, weight: .medium))
                                                     .foregroundColor(isSelected ? .yellow : .white)
-                                                Text("类别: \(type)  评分: \(String(format: "%.1f", rating))  播过: \(count)次  权重: \(String(format: "%.2f", weight))")
+                                                Text("类别: \(poi.type)  评分: \(String(format: "%.1f", poi.rating))  播过: \(poi.introduced_count)次  权重: \(String(format: "%.2f", poi.selection_weight))")
                                                     .font(.system(size: 9))
                                                     .foregroundColor(isSelected ? .yellow.opacity(0.8) : .white.opacity(0.5))
                                             }

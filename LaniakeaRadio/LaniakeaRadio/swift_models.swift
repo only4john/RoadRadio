@@ -19,6 +19,11 @@ struct RealTimeLocationPayload: Codable {
     let weather: String           // 天气
     let temperature: Int          // 温度(℃)
     let time_of_day: String       // 当前时段 (如 "下午3点")
+    let artist: String            // 当前播放音乐的歌手
+    let month: String             // 当前月份 (如 "6月")
+    let province: String          // POI 所在省
+    let city: String              // POI 所在市
+    let district: String          // POI 所在区/县
     
     init(
         lat: Double,
@@ -29,7 +34,12 @@ struct RealTimeLocationPayload: Codable {
         poi_name: String = "",
         weather: String = "",
         temperature: Int = 0,
-        time_of_day: String = ""
+        time_of_day: String = "",
+        artist: String = "",
+        month: String = "",
+        province: String = "",
+        city: String = "",
+        district: String = ""
     ) {
         self.lat = lat
         self.lon = lon
@@ -41,29 +51,37 @@ struct RealTimeLocationPayload: Codable {
         self.weather = weather
         self.temperature = temperature
         self.time_of_day = time_of_day
+        self.artist = artist
+        self.month = month
+        self.province = province
+        self.city = city
+        self.district = district
     }
 }
 
-/// 地标查询请求 - 用于 POST /upcoming-landmarks（只查高德，不带历史）
+/// 地标查询请求 - 用于 POST /upcoming-landmarks（后端会算 selection_weight）
 struct LandmarkSearchPayload: Codable {
-    let lat: Double           // 纬度
-    let lon: Double           // 经度
-    let speed_kmh: Float      // 当前车速
-    let heading: Int          // 当前方向 (0-360°)
-    let max_results: Int      // 最多返回多少个候选 (默认5)
+    let lat: Double                       // 纬度
+    let lon: Double                       // 经度
+    let speed_kmh: Float                  // 当前车速
+    let heading: Int                      // 当前方向 (0-360°)
+    let max_results: Int                  // 最多返回多少个候选 (默认5)
+    let introduced_poi_ids: [String: Int] // 本地历史：poi_id -> 已播报次数
     
     init(
         lat: Double,
         lon: Double,
         speed_kmh: Float,
         heading: Int,
-        max_results: Int = 5
+        max_results: Int = 5,
+        introduced_poi_ids: [String: Int] = [:]
     ) {
         self.lat = lat
         self.lon = lon
         self.speed_kmh = speed_kmh
         self.heading = heading
         self.max_results = max_results
+        self.introduced_poi_ids = introduced_poi_ids
     }
 }
 
@@ -81,6 +99,10 @@ struct RawPOICandidate: Codable {
     let province: String
     let city: String
     let district: String
+    // 以下字段由后端计算（可选，保持向后兼容）
+    let is_ahead: Bool?
+    let introduced_count: Int?
+    let selection_weight: Double?
 }
 
 struct UpcomingLandmarksResponse: Codable {
@@ -182,7 +204,11 @@ struct GPSData {
 // MARK: - HTTP 客户端示例
 
 class RadioAPIClient {
-    let baseURL = serverBaseURL  // 后端服务地址，定义在 ContentView.swift
+    let baseURL: String
+    
+    init(baseURL: String = serverBaseURL) {
+        self.baseURL = baseURL
+    }
     
     /// 查询前方景点
     func queryUpcomingLandmarks(

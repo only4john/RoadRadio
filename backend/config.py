@@ -1,6 +1,6 @@
 """
 API 配置和密钥管理
-支持 .env 环境变量，优先级：环境变量 > 硬编码默认值
+支持 .env 环境变量，优先级：环境变量 > 无默认值（请用 .env 配置）
 """
 
 import os
@@ -9,16 +9,30 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ==========================================
-# 🔑 API 密钥配置
+# 🔑 API 密钥配置（请通过 .env 文件设置，勿硬编码）
 # ==========================================
-AMAP_API_KEY = os.getenv("AMAP_API_KEY", "1bf4810688b1f136dd5e5d16ea67b587")
+AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
+if not AMAP_API_KEY:
+    print("⚠️  警告: AMAP_API_KEY 未设置，请配置 .env 文件")
 
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-a3664d2ba5864986b65efffc59503bef")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+if not DEEPSEEK_API_KEY:
+    print("⚠️  警告: DEEPSEEK_API_KEY 未设置，请配置 .env 文件")
 DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions")
 DEEPSEEK_REQUEST_TIMEOUT = float(os.getenv("DEEPSEEK_TIMEOUT", "30.0"))
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
-MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "sk-cp-9Xyei5hLBF7dh3dHKZZA1p-YKOYWCHV2NVzns3-_9Frjwx4XGrkdr8wuSXrZtEQCtQBAWR-PcKNJL8_s6hH4rphP2lSS53z08m4p7_wiDSQGmx5YeI95FWM")
+MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
+if not MINIMAX_API_KEY:
+    print("⚠️  警告: MINIMAX_API_KEY 未设置，请配置 .env 文件")
 MINIMAX_WS_URL = os.getenv("MINIMAX_WS_URL", "wss://api.minimax.chat/ws/v1/t2a_v2?GroupId=2025485655798195032")
+
+# ==========================================
+# 📂 数据持久化路径
+# ==========================================
+DATA_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
+os.makedirs(DATA_DIR, exist_ok=True)
+POI_KNOWLEDGE_DB = os.getenv("POI_KNOWLEDGE_DB", os.path.join(DATA_DIR, "poi_knowledge.db"))
 
 # ==========================================
 # 🎙️ 语音合成配置

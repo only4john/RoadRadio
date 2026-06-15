@@ -32,12 +32,14 @@ class LandmarkIntroRecordPayload(BaseModel):
 
 
 class LandmarkSearchPayload(BaseModel):
-    """地标查询请求 — 只查高德，不过滤"""
+    """地标查询请求 — 只查高德 + 后端算权重"""
     lat: float
     lon: float
     speed_kmh: float = 40.0
     heading: int = 0
     max_results: int = 5
+    # iOS 本地历史：poi_id -> 已播报次数（例如 {"B000A0": 3}）
+    introduced_poi_ids: dict[str, int] = {}
 
 
 class LandmarkCandidate(BaseModel):

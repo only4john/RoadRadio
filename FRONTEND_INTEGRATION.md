@@ -40,7 +40,7 @@ LandmarkSearchResponse = {
     "speed_kmh": 60,             # float: 当前车速
     "heading": 180,              # int: 当前方向
     "search_radius_m": 1000,     # int: 搜索半径 (根据速度计算)
-    "heading_filter": "±90°",    # str: 方向过滤范围说明
+    "heading_filter": "±30°",    # str: 方向过滤范围说明（速度极低时放宽）
     "selection_strategy": "...",  # str: 选择策略说明
     "candidates": [              # list: 候选 POI 列表
         {
@@ -96,7 +96,7 @@ LandmarkIntroRecordResponse = {
     响应：LandmarkSearchResponse
     
     📌 提示：
-    - 系统会自动筛选"前方±90°范围内"的景点
+    - 系统会自动筛选"前方±30°范围内"的景点（速度极低时放宽至全方向）
     - 已介绍 ≥5 次的景点会被排除
     - selected_landmark 是系统推荐的首选
     

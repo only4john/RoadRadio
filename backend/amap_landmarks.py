@@ -7,7 +7,35 @@ from config import AMAP_API_KEY
 
 AMAP_PLACE_AROUND_URL = "https://restapi.amap.com/v3/place/around"
 AMAP_SEARCH_KEYWORDS = "历史建筑|文化地标|旅游景点|博物馆|纪念馆|公园"
-MAX_SEARCH_RADIUS_METERS = 2000
+
+# ==========================================
+# ⚖️  POI 选择权重配置
+# ==========================================
+# 距离相关：100m 以内不算播报目标（可能已路过 / GPS 抖动）
+MIN_DISTANCE_CONSIDERED = 100
+# 提前多久开始考虑这个 POI（用于 preview_start_seconds）
+PREVIEW_LEAD_MINUTES = 2
+
+# POI 类型权重表（高德 typecode 前缀 -> 权重）
+# 数值越高代表"越值得做电台介绍"
+POI_TYPE_WEIGHTS = {
+    "110200": 1.5,  # 风景名胜
+    "110000": 1.5,  # 博物馆 / 知名景点
+    "110100": 1.4,  # 公园广场
+    "150200": 1.4,  # 美术馆 / 展览馆
+    "110300": 1.3,  # 城市广场
+    "150300": 1.3,  # 科技馆
+    "140000": 1.2,  # 政府机构 / 知名建筑
+    "150100": 1.1,  # 学校 / 高校（有历史感的）
+    "160000": 0.9,  # 购物
+    "170000": 0.8,  # 生活服务
+    "180000": 0.8,  # 餐饮
+    "190000": 0.4,  # 加油站 / 汽车服务（除非有特殊历史）
+    "200000": 0.3,  # 公共设施
+    "010000": 0.3,  # 地铁站 / 公交站
+    "020000": 0.2,  # 道路附属
+}
+DEFAULT_POI_TYPE_WEIGHT = 0.7
 
 # WGS84 → GCJ-02 火星坐标系转换常量
 _EARTH_A = 6378245.0  # 长半轴
@@ -86,8 +114,26 @@ def _get_type_weight(typecode: str) -> float:
     return DEFAULT_POI_TYPE_WEIGHT
 
 
+def _rating_to_popularity(rating: float) -> float:
+    """将高德评分 (0-5) 映射为热度权重 (0.4-1.0)"""
+    if rating <= 0:
+        return 0.5  # 无评分用默认值
+    return max(0.4, min(1.0, rating / 5.0))
+
+
 def compute_selection_weight(introduced_count: int, distance_m: int, is_ahead: bool = True,
-                              typecode: str = "", popularity_weight: float = 0.5) -> float:
+                              typecode: str = "", rating: float = 0.0) -> float:
+    """
+    计算 POI 的选择权重（0.0 - 1.5 范围，实际受所有因子压制）
+    
+    公式：weight = type_weight × popularity_weight × frequency_weight × proximity_weight
+    
+    硬性返回 0.0 的情况：
+    - introduced_count >= 5（已经讲烂了）
+    - distance_m < MIN_DISTANCE_CONSIDERED（太近，可能已路过）
+    - distance_m > MAX_SEARCH_RADIUS_METERS（太远，超出本次搜索范围）
+    - 不在前进方向（is_ahead == False）
+    """
     # 介绍次数 >= 5 次：直接排除
     if introduced_count >= 5:
         return 0.0
@@ -96,14 +142,13 @@ def compute_selection_weight(introduced_count: int, distance_m: int, is_ahead: b
     if distance_m < MIN_DISTANCE_CONSIDERED or not is_ahead:
         return 0.0
     
-    # 距离超过搜索半径：排除（防止远处不相关景点混入）
-    if distance_m > MAX_SEARCH_RADIUS_METERS:
-        return 0.0
-    
     # 权重 = 类型权重 × 热度评分 × 熟悉度 × 距离衰减
     type_weight = _get_type_weight(typecode)
+    popularity_weight = _rating_to_popularity(rating)
+    # 介绍过 1 次 → 0.67，2 次 → 0.5，3 次 → 0.4，4 次 → 0.33
     frequency_weight = 1.0 / (1.0 + introduced_count * 0.5)
-    proximity_weight = max(0.2, 1.0 - min(distance_m, MAX_SEARCH_RADIUS_METERS) / MAX_SEARCH_RADIUS_METERS)
+    # 距离越近权重越高，最小不低于 0.2；3000m 以外衰减到 0.2
+    proximity_weight = max(0.2, 1.0 - distance_m / 3000.0)
     
     return type_weight * popularity_weight * frequency_weight * proximity_weight
 
@@ -184,7 +229,7 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
 
     poi_pos = _parse_location(poi_location_str)
     if not poi_pos:
-        return False
+        return False90  # ±90°，即前方 180° 半圆
     
     poi_lon, poi_lat = poi_pos
     bearing_to_poi = _bearing_between_points(car_lat, car_lon, poi_lat, poi_lon)
@@ -193,8 +238,28 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
     return angle_diff <= heading_tolerance
 
 
-async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, heading: int = 0, max_results: int = 5):
-    """查询前方 POI（仅查高德 API，不做任何过滤，不过滤历史）"""
+async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, heading: int = 0,
+                                  max_results: int = 5, introduced_poi_ids: dict = None):
+    """
+    查询前方 POI，并为每个 POI 计算选择权重
+
+    Args:
+        lat, lon:         GPS 位置
+        speed_kmh:        车速（用于动态搜索半径 & 方向判断）
+        heading:          车头方向 (0-360)
+        max_results:      返回候选数量上限
+        introduced_poi_ids: iOS 本地历史 {poi_id: 播报次数}（用于算 frequency_weight）
+
+    Returns:
+        按 selection_weight 降序的 POI 列表，每个包含:
+        - 原始高德字段 (poi_id, name, type, typecode, address, distance_m, location, rating, province, city, district)
+        - selection_weight: float  选择权重（0 表示应排除）
+        - is_ahead:        bool   是否在前进方向
+        - introduced_count: int   本 POI 在 iOS 历史中的播报次数
+    """
+    if introduced_poi_ids is None:
+        introduced_poi_ids = {}
+
     # WGS84 → GCJ-02 火星坐标转换
     gcj_lat, gcj_lon = wgs84_to_gcj02(lat, lon)
     radius = normalize_search_radius(speed_kmh)
@@ -234,11 +299,32 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
         except (ValueError, TypeError):
             rating = 0.0
 
+        # 计算方向（需用 GCJ-02 坐标调高德，同坐标系）
+        is_ahead = is_poi_ahead_in_direction(
+            car_lat=gcj_lat, car_lon=gcj_lon,
+            car_heading=heading,
+            poi_location_str=poi_location,
+            speed_kmh=speed_kmh,
+        )
+
+        # 从 iOS 历史中取已播报次数
+        introduced_count = introduced_poi_ids.get(poi_id, 0)
+
+        # 计算选择权重
+        typecode = poi.get("typecode", "")
+        weight = compute_selection_weight(
+            introduced_count=introduced_count,
+            distance_m=distance,
+            is_ahead=is_ahead,
+            typecode=typecode,
+            rating=rating,
+        )
+
         landmarks.append({
             "poi_id": poi_id,
             "name": poi.get("name", "未知地点"),
             "type": poi.get("type", "未知类型"),
-            "typecode": poi.get("typecode", ""),
+            "typecode": typecode,
             "address": poi.get("address", ""),
             "distance_m": distance,
             "location": poi_location,
@@ -246,8 +332,11 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
             "province": poi.get("pname", ""),
             "city": poi.get("cityname", ""),
             "district": poi.get("adname", ""),
+            "is_ahead": is_ahead,
+            "introduced_count": introduced_count,
+            "selection_weight": round(weight, 4),
         })
 
-    # 只按距离排序，不做任何过滤
-    landmarks.sort(key=lambda x: x["distance_m"])
+    # 按选择权重降序（weight=0 的排到末尾但不删除，便于 iOS 决定如何处理）
+    landmarks.sort(key=lambda x: x["selection_weight"], reverse=True)
     return landmarks[:max_results]

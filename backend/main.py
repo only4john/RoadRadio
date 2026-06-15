@@ -14,7 +14,8 @@ app = FastAPI(title="车载情感电台后端系统")
 # ==========================================
 @app.post("/upcoming-landmarks")
 async def upcoming_landmarks(payload: LandmarkSearchPayload):
-    print(f"[📡 地标查询] 经纬度: {payload.lat},{payload.lon} | 车速: {payload.speed_kmh} km/h | 方向: {payload.heading}°")
+    history_size = len(payload.introduced_poi_ids)
+    print(f"[📡 地标查询] 经纬度: {payload.lat},{payload.lon} | 车速: {payload.speed_kmh} km/h | 方向: {payload.heading}° | 历史: {history_size} 条")
     try:
         landmarks = await get_upcoming_landmarks(
             lat=payload.lat,
@@ -22,10 +23,15 @@ async def upcoming_landmarks(payload: LandmarkSearchPayload):
             speed_kmh=payload.speed_kmh,
             heading=payload.heading,
             max_results=payload.max_results,
+            introduced_poi_ids=payload.introduced_poi_ids,
         )
     except Exception as e:
         print(f"❌ 高德地标查询失败: {e}")
         return Response(status_code=500, content="Failed to query Amap landmarks")
+
+    # 打印权重最高的前 3 个，便于调试
+    for i, lm in enumerate(landmarks[:3]):
+        print(f"  [{i+1}] {lm.get('name','?')} 距离={lm.get('distance_m','?')}m 评分={lm.get('rating',0):.1f} 权重={lm.get('selection_weight',0):.4f} ahead={lm.get('is_ahead',True)}")
 
     return {
         "candidates": landmarks,
