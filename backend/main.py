@@ -77,8 +77,7 @@ async def generate_radio(payload: RealTimeLocationPayload):
     print(f"[🚀 收到前端请求] 车速: {payload.speed_kmh}km/h | 音乐: {payload.current_music} | POI: {payload.poi_name}")
     
     try:
-        # 第一步：生成剧本（同时返回是否用了联网搜索）
-        dialogue_list, used_search = await generate_radio_script(payload)
+        dialogue_list, knowledge_source = await generate_radio_script(payload)
         
         # 第二步：合成音频
         audio_buffer = await synthesize_audio(dialogue_list)
@@ -96,6 +95,6 @@ async def generate_radio(payload: RealTimeLocationPayload):
         media_type="audio/mpeg",
         headers={
             "X-Radio-Script": encoded_script,
-            "X-Radio-Search": "1" if used_search else "0",
+            "X-Radio-Knowledge": knowledge_source,  # "web" | "cache" | "model"
         }
     )

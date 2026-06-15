@@ -16,12 +16,12 @@ from config import (
 from poi_knowledge import get_knowledge, save_knowledge
 
 
-async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list, bool]:
+async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list, str]:
     """
     调用 DeepSeek 生成电台剧本，优先使用 POI 知识库缓存
     
     Returns:
-        (dialogue_list, used_search): 对话列表 + 是否使用了联网搜索
+        (dialogue_list, knowledge_source): 对话列表 + 知识来源 ("web"|"cache"|"model")
     """
     print("🧠 正在呼叫 DeepSeek 编写剧本...")
 
@@ -38,10 +38,12 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
         print(f"📚 命中 POI 知识库缓存！{payload.province}{payload.city} {payload.poi_name} ({len(cached)} 字)")
         used_search = False
         enable_search = False
+        knowledge_source = "cache"  # 📚 来自数据库缓存
     else:
         print(f"🆕 首次查询 {payload.poi_name}，启用联网搜索")
         used_search = True
         enable_search = True
+        knowledge_source = "web"  # 🌐 本次联网搜索
 
     # 动态生成用户提示词（随机选取元素、风格、气氛、内容方向）
     user_prompt = build_radio_prompt(payload, cached_knowledge=cached)
@@ -128,11 +130,13 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
                         longitude=payload.lon
                     )
                     print(f"✅ 已将 {len(search_results)} 条真实搜索结果缓存到知识库")
-            else:
-                print(f"ℹ️  无真实搜索结果，跳过缓存（防止模型编造内容被缓存）")
+            elif enable_search and not search_results:
+                # 联网搜索开启了但没返回结果 → 纯模型知识
+                knowledge_source = "model"
+                print(f"🧠 联网搜索无结果，纯靠模型知识")
             
             print("✅ 剧本生成成功！")
-            return dialogue_list, used_search
+            return dialogue_list, knowledge_source
             
         except Exception as e:
             print(f"❌ DeepSeek 请求失败: {e}")

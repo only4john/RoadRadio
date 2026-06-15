@@ -94,7 +94,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
     @Published var bgmEnabled: Bool = false
     @Published var candidatePOIs: [POIInfo] = []
     @Published var deepseekReason: String = ""   // DeepSeek 选择理由
-    @Published var usedWebSearch: Bool = false   // 本次播报是否使用了联网搜索
+    @Published var knowledgeSource: String = ""   // "web" | "cache" | "model" | ""
 
     // 自动播报冷却
     private var lastAutoBroadcastTime: Date = .distantPast
@@ -150,8 +150,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         setupAndPlayBGM()
         setupLocation()
         setupNowPlayingObserver()
-        // 启动时获取一次天气，之后每 30 分钟自动刷新
-        Task { await fetchWeatherIfNeeded() }
+        // 天气：GPS 首次定位后自动获取 + 每 30 分钟定时刷新
         startWeatherTimer()
     }
 
@@ -175,11 +174,17 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
 
     private func setupNowPlayingObserver() {
         // 延迟至 App 完全启动后再注册，避免 init 阶段触发系统音频中断
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self else { return }
             let player = MPMusicPlayerController.systemMusicPlayer
             player.beginGeneratingPlaybackNotifications()
-            NotificationCenter.default.addObserver(self, selector: #selector(self.nowPlayingItemChanged), name: .MPMusicPlayerControllerNowPlayingItemDidChange, object: player)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(self.nowPlayingItemChanged),
+                name: .MPMusicPlayerControllerNowPlayingItemDidChange,
+                object: player
+            )
+            // 静默读取当前歌曲，不触碰播放控制
             if let item = player.nowPlayingItem, let title = item.title {
                 DispatchQueue.main.async {
                     self.currentMusicName = title
@@ -438,7 +443,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
                     "frequency_level": broadcastFrequency,
                     "weather": weatherDescription,
                     "temperature": temperature,
-                    "time_of_day": formattedTimeOfDay(),
+                    "time_of_day": formattedTimeOfDay24h(),
                     "month": formattedMonth()
                 ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
@@ -453,9 +458,9 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
                     self.currentScript = decodedScript
                 }
             }
-            if let searchFlag = httpResponse.value(forHTTPHeaderField: "X-Radio-Search") {
+            if let knowledgeHeader = httpResponse.value(forHTTPHeaderField: "X-Radio-Knowledge") {
                 DispatchQueue.main.async {
-                    self.usedWebSearch = (searchFlag == "1")
+                    self.knowledgeSource = knowledgeHeader
                 }
             }
             
@@ -634,14 +639,14 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate, CLLocatio
         }
     }
 
+    func formattedTimeOfDay24h() -> String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        return "\(hour)点"
+    }
+
     func formattedTimeOfDay() -> String {
         let hour = Calendar.current.component(.hour, from: Date())
-        switch hour {
-        case 6..<12: return "上午\(hour)点"
-        case 12..<18: return "下午\(hour - 12)点"
-        case 18..<24: return "晚上\(hour - 12)点"
-        default: return "凌晨\(hour)点"
-        }
+        return "\(hour)点"
     }
 
     func formattedMonth() -> String {
@@ -808,6 +813,21 @@ struct ContentView: View {
                     Color(red: 0.12, green: 0.06, blue: 0.18)  // 深紫黑底
                     
                     VStack {
+                        // 知识来源标记
+                        if !radioManager.knowledgeSource.isEmpty {
+                            HStack {
+                                Spacer()
+                                Text(knowledgeSourceLabel(radioManager.knowledgeSource))
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(Color.white.opacity(0.1))
+                                    .cornerRadius(8)
+                            }
+                            .padding(.horizontal)
+                        }
+                        
                         ScrollView {
                             Text(radioManager.currentScript.isEmpty ? "电台待命中...\n点击下方按钮获取沿途风光播报。" : radioManager.currentScript)
                                 .font(.body)
@@ -879,6 +899,15 @@ struct ContentView: View {
 }
 
 // MARK: - Helpers
+
+func knowledgeSourceLabel(_ source: String) -> String {
+    switch source {
+    case "web": return "🌐 联网搜索"
+    case "cache": return "📚 本地缓存"
+    case "model": return "🧠 模型知识"
+    default: return ""
+    }
+}
 
 func broadcastFrequencyDescription(frequency: Int) -> String {
     switch frequency {
