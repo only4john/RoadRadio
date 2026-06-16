@@ -245,15 +245,12 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var autoBroadcastTask: Task<Void, Never>? = nil
 
     private func triggerAutoBroadcastIfNeeded() {
-        let shouldTrigger: Bool = DispatchQueue.main.sync {
-            guard autoBroadcastTask == nil else { return false }
-            guard !isPlaying && !isLoading else { return false }
-            let cooldown: TimeInterval = displaySpeedKmh > 60 ? 90 : (displaySpeedKmh > 30 ? 150 : 240)
-            guard Date().timeIntervalSince(lastAutoBroadcastTime) >= cooldown else { return false }
-            guard displaySpeedKmh >= 0 else { return false }
-            return true
-        }
-        guard shouldTrigger else { return }
+        // ⚠️ GPS 回调已在主线程，直接检查即可（千万不能 DispatchQueue.main.sync，会死锁崩溃）
+        guard autoBroadcastTask == nil else { return }
+        guard !isPlaying && !isLoading else { return }
+        let cooldown: TimeInterval = displaySpeedKmh > 60 ? 90 : (displaySpeedKmh > 30 ? 150 : 240)
+        guard Date().timeIntervalSince(lastAutoBroadcastTime) >= cooldown else { return }
+        guard displaySpeedKmh >= 0 else { return }
 
         let threshold: Double
         switch broadcastFrequency {
@@ -264,31 +261,24 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         default:       threshold = 0.3
         }
 
-        let task = Task { [weak self] in
-            defer { Task { @MainActor in self?.autoBroadcastTask = nil } }
+        autoBroadcastTask = Task { [weak self] in
+            defer { self?.autoBroadcastTask = nil }
             guard let self = self else { return }
             await self.fetchAndSelectPOI()
             guard let poi = self.selectedPOI,
                   poi.selection_weight >= threshold else { return }
 
-            let shouldSkip: Bool = await MainActor.run {
-                if poi.poi_id == self.lastAutoBroadcastPOIId {
-                    print("⏭️ 跳过重复 POI: \(poi.name)")
-                    self.currentScript = ""
-                    return true
-                }
-                return false
+            if poi.poi_id == self.lastAutoBroadcastPOIId {
+                print("⏭️ 跳过重复 POI: \(poi.name)")
+                self.currentScript = ""
+                return
             }
-            guard !shouldSkip else { return }
 
-            await MainActor.run {
-                self.lastAutoBroadcastTime = Date()
-                self.lastAutoBroadcastPOIId = poi.poi_id
-            }
+            self.lastAutoBroadcastTime = Date()
+            self.lastAutoBroadcastPOIId = poi.poi_id
             print("🚗 自动播报触发！POI: \(poi.name) 权重: \(poi.selection_weight)")
             await self.generateAndPlayRadio(speed: self.displaySpeedKmh, music: self.currentMusicName, prefetchedPOI: poi)
         }
-        Task { @MainActor in autoBroadcastTask = task }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
