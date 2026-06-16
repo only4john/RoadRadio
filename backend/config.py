@@ -25,7 +25,16 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
 if not MINIMAX_API_KEY:
     print("⚠️  警告: MINIMAX_API_KEY 未设置，请配置 .env 文件")
-MINIMAX_WS_URL = os.getenv("MINIMAX_WS_URL", "wss://api.minimax.chat/ws/v1/t2a_v2?GroupId=2025485655798195032")
+MINIMAX_GROUP_ID = os.getenv("MINIMAX_GROUP_ID", "")
+if not MINIMAX_GROUP_ID:
+    print("⚠️  警告: MINIMAX_GROUP_ID 未设置，请配置 .env 文件")
+MINIMAX_WS_URL = os.getenv("MINIMAX_WS_URL", f"wss://api.minimax.chat/ws/v1/t2a_v2?GroupId={MINIMAX_GROUP_ID}" if MINIMAX_GROUP_ID else "")
+
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+if not TAVILY_API_KEY:
+    print("⚠️  警告: TAVILY_API_KEY 未设置，联网搜索功能不可用")
+TAVILY_SEARCH_ENDPOINT = os.getenv("TAVILY_SEARCH_ENDPOINT", "https://api.tavily.com/search")
+TAVILY_SEARCH_TIMEOUT = float(os.getenv("TAVILY_SEARCH_TIMEOUT", "10.0"))
 
 # ==========================================
 # 📂 数据持久化路径

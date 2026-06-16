@@ -1,6 +1,11 @@
 /venv
 /backend/landmark_history.db
+/backend/data/
 *.pyc
 __pycache__/
 .DS_Store
 output.mp3
+.env
+*.db
+radio.log
+backend/radio.log

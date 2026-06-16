@@ -1,7 +1,5 @@
-import os
-import random
 import httpx
-from math import inf, sin, cos, sqrt, asin, pi, atan2
+from math import inf, sin, cos, sqrt, pi
 
 from config import AMAP_API_KEY
 
@@ -229,7 +227,7 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
 
     poi_pos = _parse_location(poi_location_str)
     if not poi_pos:
-        return False90  # ±90°，即前方 180° 半圆
+        return False  # 无法解析坐标时，保守返回不在前方
     
     poi_lon, poi_lat = poi_pos
     bearing_to_poi = _bearing_between_points(car_lat, car_lon, poi_lat, poi_lon)

@@ -14,18 +14,26 @@ from config import (
     build_radio_prompt,
 )
 from poi_knowledge import get_knowledge, save_knowledge
+from query_classifier import classify_needs_search
+from tavily_search import search_web
 
 
 async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list, str]:
     """
-    调用 DeepSeek 生成电台剧本，优先使用 POI 知识库缓存
+    调用 DeepSeek 生成电台剧本
+    
+    流程：
+    1. 查 POI 知识库缓存 → 命中则直接用
+    2. 未命中 → 搜索判别器判断是否需要联网搜索
+    3. 需要搜索 → Bing Search → 结果存入知识库
+    4. 将知识注入 prompt → DeepSeek 生成剧本
     
     Returns:
         (dialogue_list, knowledge_source): 对话列表 + 知识来源 ("web"|"cache"|"model")
     """
     print("🧠 正在呼叫 DeepSeek 编写剧本...")
 
-    # ─── 🚀 查 POI 知识库 ───
+    # ─── 1. 查 POI 知识库 ───
     cached = get_knowledge(
         payload.poi_name,
         province=payload.province,
@@ -33,22 +41,66 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
         lat=payload.lat,
         lon=payload.lon
     )
-    
-    if cached:
-        print(f"📚 命中 POI 知识库缓存！{payload.province}{payload.city} {payload.poi_name} ({len(cached)} 字)")
-        used_search = False
-        enable_search = False
-        knowledge_source = "cache"  # 📚 来自数据库缓存
-    else:
-        print(f"🆕 首次查询 {payload.poi_name}，启用联网搜索")
-        used_search = True
-        enable_search = True
-        knowledge_source = "web"  # 🌐 本次联网搜索
 
-    # 动态生成用户提示词（随机选取元素、风格、气氛、内容方向）
-    user_prompt = build_radio_prompt(payload, cached_knowledge=cached)
-    
-    # 构建请求（联网搜索模式：让 DeepSeek 自动查资料减少幻觉）
+    knowledge_source = "model"
+    bing_results = []
+
+    if cached:
+        # ─── 缓存命中 ───
+        print(f"📚 命中 POI 知识库缓存！{payload.province}{payload.city} {payload.poi_name} ({len(cached)} 字)")
+        knowledge_source = "cache"
+    else:
+        # ─── 2. 搜索判别器：判断是否需要联网搜索 ───
+        need_search = await classify_needs_search(
+            payload.poi_name,
+            province=payload.province,
+            city=payload.city,
+        )
+
+        if need_search:
+            # ─── 3. Tavily 联网搜索 ───
+            location_parts = [p for p in [payload.province, payload.city, payload.district] if p]
+            location_str = "".join(location_parts)
+            search_query = f"{location_str}{payload.poi_name} 历史 介绍" if location_str else f"{payload.poi_name} 历史 介绍"
+            print(f"🌐 Tavily 搜索: {search_query}")
+            bing_results = await search_web(search_query)
+
+            if bing_results:
+                knowledge_source = "web"
+                # 存入知识库缓存
+                combined = "\n\n".join([
+                    f"[{r['title']}]\n{r['snippet']}"
+                    for r in bing_results
+                ])
+                save_knowledge(
+                    poi_name=payload.poi_name,
+                    knowledge_text=combined,
+                    province=payload.province,
+                    city=payload.city,
+                    district=payload.district,
+                    latitude=payload.lat,
+                    longitude=payload.lon,
+                )
+                print(f"✅ 已缓存 {len(bing_results)} 条搜索结果到知识库")
+            else:
+                print("ℹ️ Bing 搜索无结果，回退到模型知识")
+                knowledge_source = "model"
+        else:
+            knowledge_source = "model"
+
+    # ─── 4. 构建知识块 ───
+    knowledge_text = cached  # 缓存命中时用缓存内容
+    if not knowledge_text and bing_results:
+        # 本次搜索结果
+        knowledge_text = "\n\n".join([
+            f"[{r['title']}]\n{r['snippet']}"
+            for r in bing_results
+        ])
+
+    # ─── 5. 动态生成 prompt ───
+    user_prompt = build_radio_prompt(payload, cached_knowledge=knowledge_text)
+
+    # ─── 6. 调用 DeepSeek 生成剧本 ───
     request_body = {
         "model": DEEPSEEK_MODEL,
         "messages": [
@@ -56,12 +108,10 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
             {"role": "user", "content": user_prompt}
         ],
         "response_format": {"type": "json_object"},
-        "enable_search": enable_search
     }
-    
-    # 💡 绝对防御：直接将中文字典转为纯 UTF-8 字节流，杜绝系统 ASCII 隐式转码崩溃
+
     request_bytes = json.dumps(request_body, ensure_ascii=False).encode('utf-8')
-    
+
     async with httpx.AsyncClient(timeout=DEEPSEEK_REQUEST_TIMEOUT) as client:
         try:
             response = await client.post(
@@ -74,25 +124,7 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
             )
             response.raise_for_status()
             response_json = response.json()
-            
-            # 🔍 打印联网搜索返回（如果有的话）
-            if "choices" in response_json:
-                choice = response_json["choices"][0]
-                message = choice.get("message", {})
-                search_results = message.get("search_results", [])
-                if not search_results:
-                    search_results = response_json.get("search_results", [])
-                if search_results:
-                    print(f"🌐 DeepSeek 联网搜索到 {len(search_results)} 条资料：")
-                    for i, sr in enumerate(search_results[:5]):
-                        title = sr.get("title", sr.get("name", "?"))
-                        snippet = sr.get("snippet", sr.get("content", ""))[:150]
-                        print(f"  [{i+1}] {title}")
-                        if snippet:
-                            print(f"      {snippet}...")
-                else:
-                    print("ℹ️  未触发联网搜索（可能是热点知识或缓存命中）")
-            
+
             # 提取剧本内容
             script_content = response_json['choices'][0]['message']['content']
             if isinstance(script_content, (dict, list)):
@@ -100,44 +132,18 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
             else:
                 try:
                     script_data = json.loads(script_content, strict=False)
-                except json.JSONDecodeError as first_error:
+                except json.JSONDecodeError:
                     cleaned = script_content
-                    # 去掉 Markdown 代码块封装
-                    cleaned = re.sub(r"^```(?:json)?\\s*", "", cleaned)
+                    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
                     cleaned = re.sub(r"\s*```$", "", cleaned)
-                    # 清除非法控制字符
                     cleaned = re.sub(r"[\x00-\x1f]", " ", cleaned)
                     print("[⚠️  DeepSeek JSON 修复尝试] 原始输出：", script_content)
                     script_data = json.loads(cleaned, strict=False)
 
             dialogue_list = script_data.get('dialogue', [])
-            
-            # 💾 仅在有真实联网搜索结果时才存入知识库
-            #    避免用模型自身"编造"的内容污染缓存
-            if enable_search and search_results:
-                combined = "\n\n".join([
-                    f"[{sr.get('title', '?')}]\n{sr.get('snippet', sr.get('content', ''))}"
-                    for sr in search_results
-                ])
-                if combined.strip():
-                    save_knowledge(
-                        poi_name=payload.poi_name,
-                        knowledge_text=combined,
-                        province=payload.province,
-                        city=payload.city,
-                        district=payload.district,
-                        latitude=payload.lat,
-                        longitude=payload.lon
-                    )
-                    print(f"✅ 已将 {len(search_results)} 条真实搜索结果缓存到知识库")
-            elif enable_search and not search_results:
-                # 联网搜索开启了但没返回结果 → 纯模型知识
-                knowledge_source = "model"
-                print(f"🧠 联网搜索无结果，纯靠模型知识")
-            
             print("✅ 剧本生成成功！")
             return dialogue_list, knowledge_source
-            
+
         except Exception as e:
             print(f"❌ DeepSeek 请求失败: {e}")
             raise
@@ -147,7 +153,6 @@ async def select_best_landmark(candidates: list) -> dict:
     """用 DeepSeek 从候选 POI 中选出最有趣的一个"""
     print("🤔 正在咨询 DeepSeek 哪个 POI 最值得播报...")
 
-    # 构建候选列表（含地名全称）
     candidate_lines = []
     for i, c in enumerate(candidates):
         full_name = c.get("name", "?")
@@ -182,7 +187,6 @@ async def select_best_landmark(candidates: list) -> dict:
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.7,
-        "enable_search": False,
     }
 
     request_bytes = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
@@ -195,16 +199,7 @@ async def select_best_landmark(candidates: list) -> dict:
         )
         resp.raise_for_status()
         data_raw = resp.json()
-        
-        # 🔍 打印联网搜索结果
-        if "choices" in data_raw:
-            msg = data_raw["choices"][0].get("message", {})
-            sr = msg.get("search_results", [])
-            if sr:
-                print(f"🌐 DeepSeek 搜索到 {len(sr)} 条资料：")
-                for i, s in enumerate(sr[:3]):
-                    print(f"  [{i+1}] {s.get('title','?')}")
-        
+
         content = data_raw["choices"][0]["message"]["content"]
         try:
             data = json.loads(content)
@@ -214,7 +209,7 @@ async def select_best_landmark(candidates: list) -> dict:
 
     idx = data.get("index", 1) - 1
     if 0 <= idx < len(candidates):
-        chosen = dict(candidates[idx])  # copy
+        chosen = dict(candidates[idx])
         chosen["_selection_reason"] = data.get("reason", "")
         print(f"✅ DeepSeek 选中: {data.get('name')} — {data.get('reason')}")
         return chosen
@@ -222,6 +217,3 @@ async def select_best_landmark(candidates: list) -> dict:
     fallback = dict(candidates[0])
     fallback["_selection_reason"] = "（回退选择）"
     return fallback
-
-
-

@@ -43,7 +43,7 @@ async def upcoming_landmarks(payload: LandmarkSearchPayload):
 # ==========================================
 @app.post("/select-best-landmark")
 async def select_best(payload: SelectBestLandmarkPayload):
-    candidates = [c.dict() for c in payload.candidates]
+    candidates = [c.model_dump() for c in payload.candidates]
     print(f"[🎯 选POI] 候选数: {len(candidates)}")
     try:
         selected = await select_best_landmark(candidates)
