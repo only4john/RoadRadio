@@ -174,12 +174,15 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private func setupLocation() {
         locationManager.delegate = delegateProxy
-        locationManager.requestAlwaysAuthorization()  // 后台定位需要 Always
-        locationManager.allowsBackgroundLocationUpdates = true  // 允许后台 GPS
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.distanceFilter = 50  // 每 50 米更新一次
+        locationManager.requestAlwaysAuthorization()
+        locationManager.allowsBackgroundLocationUpdates = true
+        // 🔋 省电优化：不需要米级精度，百米级足够搜 500-2000m 范围的 POI
+        locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        locationManager.distanceFilter = 250  // 每 250 米更新一次
+        locationManager.pausesLocationUpdatesAutomatically = true  // 静止时自动暂停 GPS
+        locationManager.activityType = .automotiveNavigation  // 车载导航模式
         if CLLocationManager.headingAvailable() {
-            locationManager.headingFilter = 5
+            locationManager.headingFilter = 15  // 方向变化 15° 才更新
             locationManager.startUpdatingHeading()
         }
         locationManager.startUpdatingLocation()
