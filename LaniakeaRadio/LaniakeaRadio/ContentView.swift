@@ -497,26 +497,41 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 }
             }
             
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
                 do {
                     self.isLoading = false
-                    // 将返回的音频写入临时文件，这样可以显示文件名
+                    // 将返回的音频写入临时文件
                     let tmpName = "radio_\(Int(Date().timeIntervalSince1970)).mp3"
                     let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent(tmpName)
                     try data.write(to: tmpURL)
                     self.generatedAudioFilename = tmpName
+                    print("📁 音频已写入: \(tmpURL.path) (\(data.count) 字节)")
 
-                    self.lowerBGMVolume() // 播放人声前，先压低 BGM
-                    self.activateAudioSessionForVoice() // 激活闪避，压低系统音乐
+                    self.lowerBGMVolume()
+                    self.activateAudioSessionForVoice()
 
-                    self.voicePlayer = try AVAudioPlayer(contentsOf: tmpURL)
-                    self.voicePlayer?.delegate = self
-                    self.voicePlayer?.prepareToPlay()
-                    self.voicePlayer?.play()
+                    let player = try AVAudioPlayer(contentsOf: tmpURL)
+                    if player.duration <= 0 {
+                        print("❌ 音频时长为0，无法播放")
+                        self.restoreBGMVolume()
+                        return
+                    }
+                    print("🔊 准备播放: 时长=\(String(format: "%.1f", player.duration))秒")
+                    player.delegate = self
+                    player.volume = 1.0
+                    player.prepareToPlay()
+                    let played = player.play()
+                    if !played {
+                        print("❌ AVAudioPlayer.play() 返回 false")
+                        return
+                    }
+                    self.voicePlayer = player
                     self.isPlaying = true
+                    print("▶️ 音频开始播放")
                 } catch {
-                    print("❌ 音频播放失败: \(error)")
-                    self.restoreBGMVolume() // 如果报错，也要把 BGM 恢复
+                    print("❌ 音频播放失败: \(error.localizedDescription)")
+                    self.restoreBGMVolume()
                     self.isLoading = false
                 }
             }
