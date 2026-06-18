@@ -68,15 +68,21 @@ def get_knowledge(poi_name: str, province: str = "", city: str = "",
 
 def save_knowledge(poi_name: str, knowledge_text: str,
                    province: str = "", city: str = "", district: str = "",
-                   latitude: float = 0, longitude: float = 0):
-    """存储 POI 知识到缓存"""
+                   latitude: float = 0, longitude: float = 0,
+                   max_chars: int = 500):
+    """存储 POI 知识到缓存，默认限制 500 字"""
     now = datetime.now(timezone.utc).isoformat()
     lat_int = int(round(latitude * 10)) if latitude else 0
     lon_int = int(round(longitude * 10)) if longitude else 0
 
+    # 截断到 max_chars 字
+    if len(knowledge_text) > max_chars:
+        knowledge_text = knowledge_text[:max_chars]
+        print(f"📚 POI 知识已截断到 {max_chars} 字")
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            """INSERT OR REPLACE INTO poi_knowledge 
+            """INSERT OR REPLACE INTO poi_knowledge
                (poi_name, province, city, district, lat_int, lon_int, knowledge_text, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (poi_name, province, city, district, lat_int, lon_int, knowledge_text, now)
