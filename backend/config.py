@@ -153,7 +153,11 @@ def build_radio_prompt(payload, cached_knowledge: str = "") -> str:
                          "以及粉丝们对这位艺术家的公论，历史地位等等。")
 
     # ─── 5. 拼接 prompt ───
-    info_block = "\n".join(f"- {e}" for e in selected) if selected else "（仅关注前方地标）"
+    info_block = "\n".join(f"- {e}" for e in selected) if selected else "（无额外环境信息）"
+    
+    # 📋 日志记录：本次播报使用了哪些信息元素
+    selected_summary = ", ".join(selected) if selected else "仅地标"
+    logger.info(f"🎲 信息组合: {selected_summary} | 风格: {style[:8]} | 气氛: {atmosphere[:8]} | 内容: {hint[:12]}")
     
     # 如果有缓存的知识文本，直接注入 prompt，无需联网搜索
     knowledge_block = ""
