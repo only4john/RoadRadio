@@ -47,9 +47,8 @@ async def synthesize_audio(dialogue_list: list) -> bytearray:
             
             async with websockets.connect(
                 MINIMAX_WS_URL,
-                extra_headers=headers,
+                additional_headers=headers,
                 ssl=ssl_context,
-                open_timeout=WS_CONNECT_TIMEOUT,
             ) as ws:
                 connected_resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=WS_RECV_TIMEOUT))
                 if connected_resp.get("event") != "connected_success":
