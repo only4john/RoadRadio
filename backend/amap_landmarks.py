@@ -223,7 +223,7 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
     if speed_kmh < 2.0:
         return True
 
-    heading_tolerance = 90  # ±90°，即前方 180° 半圆
+    heading_tolerance = 30  # ±30°，即前方 60° 扇形
 
     poi_pos = _parse_location(poi_location_str)
     if not poi_pos:
