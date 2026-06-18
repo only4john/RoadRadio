@@ -10,9 +10,9 @@ from config import (
     MINIMAX_WS_URL,
     VOICE_SETTINGS,
     AUDIO_SETTINGS,
+    logger,
 )
 
-WS_CONNECT_TIMEOUT = 15
 WS_RECV_TIMEOUT = 30
 
 
@@ -33,11 +33,12 @@ async def synthesize_audio(dialogue_list: list) -> bytearray:
     
     ssl_context = ssl.create_default_context()
     
+    # 保留 headers 但通过 extra_headers 传递（websockets 12.x 参数名）
     headers = {
         "Authorization": f"Bearer {MINIMAX_API_KEY}"
     }
     
-    print("🎙️ 正在连接 MiniMax 录音棚...")
+    logger.info("🎙️ 正在连接 MiniMax 录音棚...")
     
     try:
         for line in dialogue_list:
@@ -47,7 +48,7 @@ async def synthesize_audio(dialogue_list: list) -> bytearray:
             
             async with websockets.connect(
                 MINIMAX_WS_URL,
-                additional_headers=headers,
+                extra_headers=headers,
                 ssl=ssl_context,
             ) as ws:
                 connected_resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=WS_RECV_TIMEOUT))
@@ -84,9 +85,9 @@ async def synthesize_audio(dialogue_list: list) -> bytearray:
                         await ws.send(json.dumps({"event": "task_finish"}))
                         break
 
-        print("✅ 音频合成与拼接完成！")
+        logger.info("✅ 音频合成与拼接完成！")
         return audio_buffer
         
     except Exception as e:
-        print(f"❌ MiniMax WebSocket 异常: {e}")
+        logger.error(f"❌ MiniMax WebSocket 异常: {e}")
         raise
