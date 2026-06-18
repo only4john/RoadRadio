@@ -69,8 +69,8 @@ def get_knowledge(poi_name: str, province: str = "", city: str = "",
 def save_knowledge(poi_name: str, knowledge_text: str,
                    province: str = "", city: str = "", district: str = "",
                    latitude: float = 0, longitude: float = 0,
-                   max_chars: int = 500):
-    """存储 POI 知识到缓存，默认限制 500 字"""
+                   max_chars: int = 1000):
+    """存储 POI 知识到缓存，每个 POI 最多 1000 字"""
     now = datetime.now(timezone.utc).isoformat()
     lat_int = int(round(latitude * 10)) if latitude else 0
     lon_int = int(round(longitude * 10)) if longitude else 0
