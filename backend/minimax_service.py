@@ -47,7 +47,7 @@ async def synthesize_audio(dialogue_list: list) -> bytearray:
             
             async with websockets.connect(
                 MINIMAX_WS_URL,
-                extra_headers=headers,
+                additional_headers=headers,
                 ssl=ssl_context,
                 open_timeout=WS_CONNECT_TIMEOUT,
                 close_timeout=10,
@@ -58,7 +58,7 @@ async def synthesize_audio(dialogue_list: list) -> bytearray:
 
                 task_start_msg = {
                     "event": "task_start",
-                    "model": "speech-2.8-hd",
+                    "model": "speech-01-hd",
                     "voice_setting": voice_setting,
                     "audio_setting": AUDIO_SETTINGS,
                 }
