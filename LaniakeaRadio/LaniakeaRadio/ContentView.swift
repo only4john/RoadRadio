@@ -562,7 +562,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         return candidates.filter { poi in
             let count = history[poi.poi_id] ?? 0
             if count >= 5 { return false }   // 播过 ≥5 次，排除
-            if poi.rating > 0 && poi.rating < 3.0 { return false }  // 有评分但 <3，排除
+            if poi.rating > 0 && poi.rating < 2.0 { return false }  // 有评分但 <2.0，排除
             return true
         }
     }
