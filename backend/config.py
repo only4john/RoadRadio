@@ -35,12 +35,14 @@ DEEPSEEK_REQUEST_TIMEOUT = float(os.getenv("DEEPSEEK_TIMEOUT", "30.0"))
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
-if not MINIMAX_API_KEY:
-    print("⚠️  警告: MINIMAX_API_KEY 未设置，请配置 .env 文件")
 MINIMAX_GROUP_ID = os.getenv("MINIMAX_GROUP_ID", "")
-if not MINIMAX_GROUP_ID:
+MINIMAX_WS_URL = os.getenv("MINIMAX_WS_URL", "")
+# 如果没有设置 MINIMAX_WS_URL，从 GroupId 自动构建
+if not MINIMAX_WS_URL and MINIMAX_GROUP_ID:
+    MINIMAX_WS_URL = f"wss://api.minimax.chat/ws/v1/t2a_v2?GroupId={MINIMAX_GROUP_ID}"
+    print(f"ℹ️  MINIMAX_WS_URL 已自动构建 (GroupId={MINIMAX_GROUP_ID})")
+elif not MINIMAX_WS_URL and not MINIMAX_GROUP_ID:
     print("⚠️  警告: MINIMAX_GROUP_ID 未设置，请配置 .env 文件")
-MINIMAX_WS_URL = os.getenv("MINIMAX_WS_URL", f"wss://api.minimax.chat/ws/v1/t2a_v2?GroupId={MINIMAX_GROUP_ID}" if MINIMAX_GROUP_ID else "")
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 if not TAVILY_API_KEY:

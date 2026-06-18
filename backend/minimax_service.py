@@ -58,7 +58,7 @@ async def synthesize_audio(dialogue_list: list) -> bytearray:
 
                 task_start_msg = {
                     "event": "task_start",
-                    "model": "speech-01-hd",
+                    "model": "speech-2.6-hd",
                     "voice_setting": voice_setting,
                     "audio_setting": AUDIO_SETTINGS,
                 }
