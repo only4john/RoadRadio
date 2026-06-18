@@ -72,7 +72,7 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
                     f"[{r['title']}]\n{r['snippet']}"
                     for r in bing_results
                 ])
-                save_knowledge(
+                await save_knowledge(
                     poi_name=payload.poi_name,
                     knowledge_text=combined,
                     province=payload.province,

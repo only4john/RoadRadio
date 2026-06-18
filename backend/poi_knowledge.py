@@ -2,10 +2,58 @@
 POI 知识库缓存 — 为每个地标存储搜索结果，避免重复联网搜索
 """
 import sqlite3
+import json
+import httpx
 from datetime import datetime, timezone
-from config import POI_KNOWLEDGE_DB
+from config import POI_KNOWLEDGE_DB, DEEPSEEK_API_KEY, DEEPSEEK_API_URL, DEEPSEEK_MODEL
 
 DB_PATH = POI_KNOWLEDGE_DB
+
+SUMMARIZE_PROMPT = """请将以下景点搜索资料总结为 {max_chars} 字左右的精炼摘要。
+保留：名称、位置、历史背景、文化意义、主要特色、趣闻轶事。
+去除：广告信息、网站 URL、重复内容、无关信息。
+
+原始资料：
+{text}
+
+精炼摘要："""
+
+
+async def _summarize_knowledge(text: str, max_chars: int = 1000) -> str:
+    """用 DeepSeek 将搜索资料总结为精炼摘要"""
+    if len(text) <= max_chars:
+        return text
+
+    prompt = SUMMARIZE_PROMPT.format(max_chars=max_chars, text=text)
+    request_body = {
+        "model": DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": "你是一个知识管理员，擅长提炼和总结景点信息。"},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3,
+        "max_tokens": max_chars * 2,  # 中文一个字约 2 token
+    }
+    request_bytes = json.dumps(request_body, ensure_ascii=False).encode('utf-8')
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                DEEPSEEK_API_URL,
+                headers={
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                content=request_bytes
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            summary = data['choices'][0]['message']['content'].strip()
+            print(f"📝 DeepSeek 已将 {len(text)} 字总结为 {len(summary)} 字")
+            return summary
+    except Exception as e:
+        print(f"⚠️  总结失败，回退到硬截断: {e}")
+        return text[:max_chars]
 
 
 def _ensure_db():
@@ -66,19 +114,18 @@ def get_knowledge(poi_name: str, province: str = "", city: str = "",
         return row[0] if row else None
 
 
-def save_knowledge(poi_name: str, knowledge_text: str,
+async def save_knowledge(poi_name: str, knowledge_text: str,
                    province: str = "", city: str = "", district: str = "",
                    latitude: float = 0, longitude: float = 0,
                    max_chars: int = 1000):
-    """存储 POI 知识到缓存，每个 POI 最多 1000 字"""
+    """存储 POI 知识到缓存，超过 max_chars 用 DeepSeek 智能总结"""
     now = datetime.now(timezone.utc).isoformat()
     lat_int = int(round(latitude * 10)) if latitude else 0
     lon_int = int(round(longitude * 10)) if longitude else 0
 
-    # 截断到 max_chars 字
+    # 超过上限 → DeepSeek 智能总结
     if len(knowledge_text) > max_chars:
-        knowledge_text = knowledge_text[:max_chars]
-        print(f"📚 POI 知识已截断到 {max_chars} 字")
+        knowledge_text = await _summarize_knowledge(knowledge_text, max_chars)
 
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
