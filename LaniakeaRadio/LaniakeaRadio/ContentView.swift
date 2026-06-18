@@ -628,12 +628,11 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
         
         let poiInfo = POIInfo(from: best)
-        DispatchQueue.main.async {
-            self.selectedPOI = poiInfo
-            self.currentScript = "准备播报：\(best.name)"
-            self.selectedPOIName = best.name
-            self.deepseekReason = reason
-        }
+        // ⚠️ 不能放 DispatchQueue.main.async — 调用方 await 返回后会立即检查 selectedPOI，异步设置会导致 nil
+        self.selectedPOI = poiInfo
+        self.currentScript = "准备播报：\(best.name)"
+        self.selectedPOIName = best.name
+        self.deepseekReason = reason
     }
 
     // Fetch weather from Open-Meteo (no API key required) and update weatherDescription & temperature
