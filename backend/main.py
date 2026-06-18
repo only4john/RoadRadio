@@ -1,6 +1,7 @@
 import urllib.parse
 from fastapi import FastAPI, Response
 
+from config import logger
 from models import RealTimeLocationPayload, LandmarkIntroRecordPayload, LandmarkSearchPayload, SelectBestLandmarkPayload
 from amap_landmarks import get_upcoming_landmarks
 from deepseek_service import generate_radio_script, select_best_landmark
@@ -15,7 +16,7 @@ app = FastAPI(title="车载情感电台后端系统")
 @app.post("/upcoming-landmarks")
 async def upcoming_landmarks(payload: LandmarkSearchPayload):
     history_size = len(payload.introduced_poi_ids)
-    print(f"[📡 地标查询] 经纬度: {payload.lat},{payload.lon} | 车速: {payload.speed_kmh} km/h | 方向: {payload.heading}° | 历史: {history_size} 条")
+    logger.info(f"[📡 地标查询] 经纬度: {payload.lat},{payload.lon} | 车速: {payload.speed_kmh} km/h | 方向: {payload.heading}° | 历史: {history_size} 条")
     try:
         landmarks = await get_upcoming_landmarks(
             lat=payload.lat,
@@ -26,12 +27,12 @@ async def upcoming_landmarks(payload: LandmarkSearchPayload):
             introduced_poi_ids=payload.introduced_poi_ids,
         )
     except Exception as e:
-        print(f"❌ 高德地标查询失败: {e}")
+        logger.error(f"❌ 高德地标查询失败: {e}")
         return Response(status_code=500, content="Failed to query Amap landmarks")
 
     # 打印权重最高的前 3 个，便于调试
     for i, lm in enumerate(landmarks[:3]):
-        print(f"  [{i+1}] {lm.get('name','?')} 距离={lm.get('distance_m','?')}m 评分={lm.get('rating',0):.1f} 权重={lm.get('selection_weight',0):.4f} ahead={lm.get('is_ahead',True)}")
+        logger.info(f"  [{i+1}] {lm.get('name','?')} 距离={lm.get('distance_m','?')}m 评分={lm.get('rating',0):.1f} 权重={lm.get('selection_weight',0):.4f} ahead={lm.get('is_ahead',True)}")
 
     return {
         "candidates": landmarks,
@@ -44,13 +45,13 @@ async def upcoming_landmarks(payload: LandmarkSearchPayload):
 @app.post("/select-best-landmark")
 async def select_best(payload: SelectBestLandmarkPayload):
     candidates = [c.model_dump() for c in payload.candidates]
-    print(f"[🎯 选POI] 候选数: {len(candidates)}")
+    logger.info(f"[🎯 选POI] 候选数: {len(candidates)}")
     try:
         selected = await select_best_landmark(candidates)
         if selected:
-            print(f"[✅ DeepSeek选中] {selected.get('name', '?')} (id={selected.get('poi_id', '?')})")
+            logger.info(f"[✅ DeepSeek选中] {selected.get('name', '?')} (id={selected.get('poi_id', '?')})")
     except Exception as e:
-        print(f"[⚠️ DeepSeek选POI失败，回退第一个] {e}")
+        logger.error(f"[⚠️ DeepSeek选POI失败，回退第一个] {e}")
         selected = candidates[0] if candidates else None
 
     return {
@@ -64,8 +65,7 @@ async def select_best(payload: SelectBestLandmarkPayload):
 # ==========================================
 @app.post("/record-landmark")
 async def record_landmark(payload: LandmarkIntroRecordPayload):
-    # POI 历史已完全由客户端本地存储管理，服务端仅做记录
-    print(f"[📋 播报记录] POI={payload.poi_id} 名称={payload.name} (客户端已本地存储)")
+    logger.info(f"[📋 播报记录] POI={payload.poi_id} 名称={payload.name}")
     return {"status": "ok", "poi_id": payload.poi_id}
 
 
@@ -74,16 +74,17 @@ async def record_landmark(payload: LandmarkIntroRecordPayload):
 # ==========================================
 @app.post("/generate-radio")
 async def generate_radio(payload: RealTimeLocationPayload):
-    print(f"[🚀 收到前端请求] 车速: {payload.speed_kmh}km/h | 音乐: {payload.current_music} | POI: {payload.poi_name}")
+    logger.info(f"[🚀 请求] 车速={payload.speed_kmh}km/h | 音乐={payload.current_music} | POI={payload.poi_name}")
     
     try:
         dialogue_list, knowledge_source = await generate_radio_script(payload)
         
         # 第二步：合成音频
         audio_buffer = await synthesize_audio(dialogue_list)
+        logger.info(f"[✅ 成功] 剧本={len(dialogue_list)}轮 来源={knowledge_source} 音频={len(audio_buffer)}字节")
         
     except Exception as e:
-        print(f"❌ 电台生成失败: {e}")
+        logger.error(f"❌ 电台生成失败: {e}")
         return Response(status_code=500, content="Failed to generate radio")
     
     # 第三步：打包返回 (字幕 + 二进制音频 + 搜索标签)
@@ -95,6 +96,6 @@ async def generate_radio(payload: RealTimeLocationPayload):
         media_type="audio/mpeg",
         headers={
             "X-Radio-Script": encoded_script,
-            "X-Radio-Knowledge": knowledge_source,  # "web" | "cache" | "model"
+            "X-Radio-Knowledge": knowledge_source,
         }
     )

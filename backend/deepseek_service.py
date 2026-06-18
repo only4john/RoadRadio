@@ -12,6 +12,7 @@ from config import (
     DEEPSEEK_MODEL,
     DEEPSEEK_SYSTEM_PROMPT,
     build_radio_prompt,
+    logger,
 )
 from poi_knowledge import get_knowledge, save_knowledge
 from query_classifier import classify_needs_search
@@ -31,7 +32,7 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
     Returns:
         (dialogue_list, knowledge_source): 对话列表 + 知识来源 ("web"|"cache"|"model")
     """
-    print("🧠 正在呼叫 DeepSeek 编写剧本...")
+    logger.info("🧠 正在呼叫 DeepSeek 编写剧本...")
 
     # ─── 1. 查 POI 知识库 ───
     cached = get_knowledge(
@@ -47,7 +48,7 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
 
     if cached:
         # ─── 缓存命中 ───
-        print(f"📚 命中 POI 知识库缓存！{payload.province}{payload.city} {payload.poi_name} ({len(cached)} 字)")
+        logger.info(f"📚 命中 POI 知识库缓存！{payload.province}{payload.city} {payload.poi_name} ({len(cached)} 字)")
         knowledge_source = "cache"
     else:
         # ─── 2. 搜索判别器：判断是否需要联网搜索 ───
@@ -62,12 +63,11 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
             location_parts = [p for p in [payload.province, payload.city, payload.district] if p]
             location_str = "".join(location_parts)
             search_query = f"{location_str}{payload.poi_name} 历史 介绍" if location_str else f"{payload.poi_name} 历史 介绍"
-            print(f"🌐 Tavily 搜索: {search_query}")
+            logger.info(f"🌐 Tavily 搜索: {search_query}")
             bing_results = await search_web(search_query)
 
             if bing_results:
                 knowledge_source = "web"
-                # 存入知识库缓存
                 combined = "\n\n".join([
                     f"[{r['title']}]\n{r['snippet']}"
                     for r in bing_results
@@ -81,9 +81,9 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
                     latitude=payload.lat,
                     longitude=payload.lon,
                 )
-                print(f"✅ 已缓存 {len(bing_results)} 条搜索结果到知识库")
+                logger.info(f"✅ 已缓存 {len(bing_results)} 条搜索结果到知识库")
             else:
-                print("ℹ️ Bing 搜索无结果，回退到模型知识")
+                logger.info("ℹ️ 搜索无结果，回退到模型知识")
                 knowledge_source = "model"
         else:
             knowledge_source = "model"
@@ -137,21 +137,21 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
                     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
                     cleaned = re.sub(r"\s*```$", "", cleaned)
                     cleaned = re.sub(r"[\x00-\x1f]", " ", cleaned)
-                    print("[⚠️  DeepSeek JSON 修复尝试] 原始输出：", script_content)
+                    logger.warning(f"[⚠️ DeepSeek JSON 修复] {script_content[:200]}")
                     script_data = json.loads(cleaned, strict=False)
 
             dialogue_list = script_data.get('dialogue', [])
-            print("✅ 剧本生成成功！")
+            logger.info("✅ 剧本生成成功！")
             return dialogue_list, knowledge_source
 
         except Exception as e:
-            print(f"❌ DeepSeek 请求失败: {e}")
+            logger.error(f"❌ DeepSeek 请求失败: {e}")
             raise
 
 
 async def select_best_landmark(candidates: list) -> dict:
     """用 DeepSeek 从候选 POI 中选出最有趣的一个"""
-    print("🤔 正在咨询 DeepSeek 哪个 POI 最值得播报...")
+    logger.info(f"🤔 DeepSeek 选最佳 POI，候选数: {len(candidates)}")
 
     candidate_lines = []
     for i, c in enumerate(candidates):
@@ -211,9 +211,9 @@ async def select_best_landmark(candidates: list) -> dict:
     if 0 <= idx < len(candidates):
         chosen = dict(candidates[idx])
         chosen["_selection_reason"] = data.get("reason", "")
-        print(f"✅ DeepSeek 选中: {data.get('name')} — {data.get('reason')}")
+        logger.info(f"✅ DeepSeek 选中: {data.get('name')} — {data.get('reason')}")
         return chosen
-    print(f"⚠️ DeepSeek 返回无效索引，回退到第一个候选")
+    logger.warning(f"⚠️ DeepSeek 返回无效索引，回退到第一个候选")
     fallback = dict(candidates[0])
     fallback["_selection_reason"] = "（回退选择）"
     return fallback

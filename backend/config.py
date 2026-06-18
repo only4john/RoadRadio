@@ -4,9 +4,21 @@ API 配置和密钥管理
 """
 
 import os
+import logging
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ==========================================
+# 📋 统一日志配置（带时间戳）
+# ==========================================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger("laniakea")
 
 # ==========================================
 # 🔑 API 密钥配置（请通过 .env 文件设置，勿硬编码）

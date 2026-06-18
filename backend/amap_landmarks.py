@@ -1,7 +1,7 @@
 import httpx
 from math import inf, sin, cos, sqrt, pi
 
-from config import AMAP_API_KEY
+from config import AMAP_API_KEY, logger
 
 AMAP_PLACE_AROUND_URL = "https://restapi.amap.com/v3/place/around"
 AMAP_SEARCH_KEYWORDS = "历史建筑|文化地标|旅游景点|博物馆|纪念馆|公园"
@@ -278,9 +278,9 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
 
     pois = data.get("pois", [])
     if not pois:
-        print(f"[⚠️  高德返回空结果] lat={lat} lon={lon} radius={radius} keywords={AMAP_SEARCH_KEYWORDS}")
+        logger.warning(f"高德返回空结果 | lat={lat} lon={lon} radius={radius} keywords={AMAP_SEARCH_KEYWORDS}")
         if not _is_coordinate_in_china(lat, lon):
-            print(f"[ℹ️  坐标不在中国范围内，使用模拟地标候选]")
+            logger.info("坐标不在中国范围内，使用模拟地标候选")
             return [_create_simulated_landmark(lat, lon, speed_kmh)]
 
     landmarks = []

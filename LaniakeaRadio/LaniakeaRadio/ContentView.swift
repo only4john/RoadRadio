@@ -774,15 +774,24 @@ struct ContentView: View {
                         }
 
                         // BGM 开关
-                        Button(action: {
-                            radioManager.toggleBGM()
-                        }) {
-                            Label(
-                                radioManager.bgmEnabled ? "BGM 开" : "BGM 关",
-                                systemImage: radioManager.bgmEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill"
-                            )
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.7))
+                        HStack(spacing: 16) {
+                            Button(action: {
+                                radioManager.toggleBGM()
+                            }) {
+                                Label(
+                                    radioManager.bgmEnabled ? "BGM 开" : "BGM 关",
+                                    systemImage: radioManager.bgmEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill"
+                                )
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.7))
+                            }
+                            Button(action: {
+                                LandmarkHistoryManager.shared.clearAll()
+                            }) {
+                                Label("清除历史", systemImage: "trash")
+                                    .font(.caption2)
+                                    .foregroundColor(.red.opacity(0.7))
+                            }
                         }
 
                         #if targetEnvironment(simulator)
