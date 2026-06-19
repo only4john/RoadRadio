@@ -141,6 +141,10 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
                     script_data = json.loads(cleaned, strict=False)
 
             dialogue_list = script_data.get('dialogue', [])
+            # 硬截断：最多 6 轮对话（12 条），防止 DeepSeek 不遵守指令
+            if len(dialogue_list) > 6:
+                logger.warning(f"⚠️ DeepSeek 生成 {len(dialogue_list)} 轮，截断为 6 轮")
+                dialogue_list = dialogue_list[:6]
             logger.info("✅ 剧本生成成功！")
             return dialogue_list, knowledge_source
 
