@@ -47,9 +47,13 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
     bing_results = []
 
     if cached:
-        # ─── 缓存命中 ───
-        logger.info(f"📚 命中 POI 知识库缓存！{payload.province}{payload.city} {payload.poi_name} ({len(cached)} 字)")
-        knowledge_source = "cache"
+        # ─── 缓存命中，但检查相关性 ───
+        if payload.poi_name not in cached:
+            logger.info(f"⚠️ 缓存内容不包含 POI 名「{payload.poi_name}」，丢弃缓存，回退联网搜索")
+            cached = None
+        else:
+            logger.info(f"📚 命中 POI 知识库缓存！{payload.province}{payload.city} {payload.poi_name} ({len(cached)} 字)")
+            knowledge_source = "cache"
     else:
         # ─── 2. 搜索判别器：判断是否需要联网搜索 ───
         need_search = await classify_needs_search(

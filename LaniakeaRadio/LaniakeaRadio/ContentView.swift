@@ -8,7 +8,7 @@ import MediaPlayer
 // 🌐 后端服务器地址（修改这里即可切换）
 //    真机请改为 Mac 局域网 IP 或云服务器地址
 // ==========================================
-let serverBaseURL = UserDefaults.standard.string(forKey: "serverBaseURL") ?? "http://49.51.247.112:8000"
+let serverBaseURL = UserDefaults.standard.string(forKey: "serverBaseURL") ?? "https://radio.laniakea.co.nz"
 
 // ==========================================
 // 📦 类型安全的 POI 数据结构（替代 [String: Any] 字典）
@@ -196,23 +196,16 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     private func setupNowPlayingObserver() {
-        // iOS 17+ 要求 Apple Music entitlement，没有权限时静默跳过
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        // ⚠️ 不立即访问 systemMusicPlayer（会中断 Apple Music），延迟 3 秒后定时轮询
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             guard let self = self else { return }
-            let player = MPMusicPlayerController.systemMusicPlayer
-            
-            // 尝试获取当前播放信息（如果没有 entitlement 会抛异常）
-            if let item = player.nowPlayingItem, let title = item.title {
-                self.currentMusicName = title
-                self.currentArtist = item.artist ?? ""
-            }
-            
-            // beginGeneratingPlaybackNotifications 需要 entitlement，可能 crash
-            // 改为定时轮询代替
-            self.nowPlayingObserver = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            // 仅设置定时器，不立即读取 nowPlayingItem（避免激活音频会话）
+            self.nowPlayingObserver = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
                 guard let self = self else { return }
+                // 检查是否有 entitlements（个人开发者账号可能没有）
+                // 用 if-let 兜底，没权限时静默跳过
                 if let item = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem,
-                   let title = item.title {
+                   let title = item.title, !title.isEmpty {
                     DispatchQueue.main.async {
                         self.currentMusicName = title
                         self.currentArtist = item.artist ?? ""
