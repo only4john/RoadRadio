@@ -77,15 +77,15 @@ def wgs84_to_gcj02(lat: float, lon: float) -> tuple[float, float]:
 
 def normalize_search_radius(speed_kmh: float) -> int:
     if speed_kmh <= 0:
-        return 300  # 静止时 300m（原来100m太窄，很多区域无景点）
+        return 200  # 静止时 200m
     elif speed_kmh <= 30:
-        return 500
+        return 300
     elif speed_kmh <= 70:
-        return 1000
+        return 500
     elif speed_kmh <= 100:
-        return 2000
+        return 800
     else:
-        return 3000
+        return 1000
 
 
 def format_location(lat: float, lon: float) -> str:

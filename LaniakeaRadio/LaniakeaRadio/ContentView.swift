@@ -262,7 +262,10 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             guard let self = self else { return }
             await self.fetchAndSelectPOI()
             guard let poi = self.selectedPOI,
-                  poi.selection_weight >= threshold else { return }
+                  poi.selection_weight >= threshold else {
+                self.currentScript = "⏭️ 附近有景点但权重低于阈值，等待更佳 POI..."
+                return
+            }
 
             if poi.poi_id == self.lastAutoBroadcastPOIId {
                 print("⏭️ 跳过重复 POI: \(poi.name)")
@@ -279,7 +282,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
         DispatchQueue.main.async {
-            var raw = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+            var raw = newHeading.magneticHeading  // 直接用罗盘绝对方位，不依赖加速度计
             
             // 根据设备方向修正：用户始终面朝摄像头=前方
             let orientation = UIDevice.current.orientation
@@ -295,17 +298,19 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             }
             if raw < 0 { raw += 360 }
             
-            // EMA 平滑
+            // EMA 平滑（α=0.7，快速响应；headingFilter=15° 已提供硬件级去抖）
             if !self.headingInitialized {
                 self.smoothedHeading = raw
                 self.headingInitialized = true
             } else {
-                let alpha = 0.15
+                let alpha = 0.7
                 var diff = raw - self.smoothedHeading
-                while diff > 180 { diff -= 360 }
-                while diff < -180 { diff += 360 }
-                self.smoothedHeading = (self.smoothedHeading + alpha * diff)
-                    .truncatingRemainder(dividingBy: 360)
+                // 归一化角度差到 (-180, 180]
+                if diff > 180 { diff -= 360 }
+                if diff <= -180 { diff += 360 }
+                self.smoothedHeading += alpha * diff
+                // 归一化到 [0, 360)
+                self.smoothedHeading = self.smoothedHeading.truncatingRemainder(dividingBy: 360)
                 if self.smoothedHeading < 0 { self.smoothedHeading += 360 }
             }
             self.headingDeg = Int(self.smoothedHeading)
@@ -621,16 +626,15 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
         
         let poiInfo = POIInfo(from: best)
-        // ⚠️ 不能放 DispatchQueue.main.async — 调用方 await 返回后会立即检查 selectedPOI，异步设置会导致 nil
         self.selectedPOI = poiInfo
-        self.currentScript = "准备播报：\(best.name)"
         self.selectedPOIName = best.name
+        // 「准备播报」由调用方在通过阈值检查后再设置，避免误导
         self.deepseekReason = reason
     }
 
     // Fetch weather from Open-Meteo (no API key required) and update weatherDescription & temperature
     func fetchWeatherIfNeeded() async {
-        await fetchWeather(lat: latitude, lon: longitude)
+        await fetchWeather(lat: displayLatitude, lon: displayLongitude)
     }
 
     func fetchWeather(lat: Double, lon: Double) async {
@@ -960,14 +964,25 @@ func knowledgeSourceLabel(_ source: String) -> String {
 }
 
 func broadcastFrequencyDescription(frequency: Int) -> String {
+    let threshold = broadcastFrequencyThreshold(frequency)
     switch frequency {
     case 0..<20:
-        return "仅著名地标（高权重）"
+        return "仅著名地标（权重≥\(String(format: "%.1f", threshold))）"
     case 20..<50:
-        return "稀疏播报"
+        return "稀疏播报（权重≥\(String(format: "%.1f", threshold))）"
     case 50..<80:
-        return "中等频率"
+        return "中等频率（权重≥\(String(format: "%.1f", threshold))）"
     default:
-        return "高频（可达每分钟）"
+        return "高频播报（权重≥\(String(format: "%.1f", threshold))）"
+    }
+}
+
+func broadcastFrequencyThreshold(_ frequency: Int) -> Double {
+    switch frequency {
+    case 80...100: return 0.0
+    case 50..<80:  return 0.1
+    case 20..<50:  return 0.3
+    case 0..<20:   return 0.6
+    default:       return 0.3
     }
 }
