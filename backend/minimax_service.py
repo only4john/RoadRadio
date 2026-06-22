@@ -22,7 +22,7 @@ async def _synthesize_one_line(ws_url: str, role: str, text: str,
     headers = {"Authorization": f"Bearer {MINIMAX_API_KEY}"}
     buf = bytearray()
     try:
-        async with websockets.connect(ws_url, extra_headers=headers, ssl=ssl_context) as ws:
+        async with websockets.connect(ws_url, additional_headers=headers, ssl=ssl_context) as ws:
             connected_resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=WS_RECV_TIMEOUT))
             if connected_resp.get("event") != "connected_success":
                 raise RuntimeError(f"MiniMax 连接失败[{index}]: {connected_resp}")
