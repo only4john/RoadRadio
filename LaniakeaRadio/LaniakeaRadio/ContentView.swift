@@ -609,7 +609,6 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         self.selectedPOI = poiInfo
         self.selectedPOIName = best.name
         self.deepseekReason = "（前端选最高权重）"
-        self.deepseekReason = reason
     }
 
     // Fetch weather from Open-Meteo (no API key required) and update weatherDescription & temperature

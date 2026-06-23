@@ -71,21 +71,28 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
             bing_results = await search_web(search_query)
 
             if bing_results:
-                knowledge_source = "web"
-                combined = "\n\n".join([
-                    f"[{r['title']}]\n{r['snippet']}"
-                    for r in bing_results
-                ])
-                await save_knowledge(
-                    poi_name=payload.poi_name,
-                    knowledge_text=combined,
-                    province=payload.province,
-                    city=payload.city,
-                    district=payload.district,
-                    latitude=payload.lat,
-                    longitude=payload.lon,
-                )
-                logger.info(f"✅ 已缓存 {len(bing_results)} 条搜索结果到知识库")
+                # ─── 相关性检查：搜索结果是否真的在讲这个 POI ───
+                relevant_count = sum(1 for r in bing_results
+                    if payload.poi_name in (r.get('title', '') + r.get('snippet', '')))
+                if relevant_count >= 2:
+                    knowledge_source = "web"
+                    combined = "\n\n".join([
+                        f"[{r['title']}]\n{r['snippet']}"
+                        for r in bing_results
+                    ])
+                    await save_knowledge(
+                        poi_name=payload.poi_name,
+                        knowledge_text=combined,
+                        province=payload.province,
+                        city=payload.city,
+                        district=payload.district,
+                        latitude=payload.lat,
+                        longitude=payload.lon,
+                    )
+                    logger.info(f"✅ 已缓存 {len(bing_results)} 条搜索结果到知识库 ({relevant_count} 条相关)")
+                else:
+                    logger.info(f"⚠️ 搜索结果不相关 ({relevant_count}/{len(bing_results)} 条提及「{payload.poi_name}」)，放弃缓存，用模型知识")
+                    knowledge_source = "model"
             else:
                 logger.info("ℹ️ 搜索无结果，回退到模型知识")
                 knowledge_source = "model"
