@@ -4,7 +4,7 @@ from math import inf, sin, cos, sqrt, pi
 from config import AMAP_API_KEY, logger
 
 AMAP_PLACE_AROUND_URL = "https://restapi.amap.com/v3/place/around"
-AMAP_SEARCH_KEYWORDS = "历史建筑|文化地标|旅游景点|博物馆|纪念馆|公园"
+AMAP_SEARCH_KEYWORDS = "历史建筑|文化地标|旅游景点|博物馆|纪念馆|公园|大学|名人故居|寺庙|教堂|古塔|古桥|老街|古镇|广场|故居|遗址"
 
 # ==========================================
 # ⚖️  POI 选择权重配置
@@ -335,6 +335,7 @@ async def get_upcoming_landmarks(lat: float, lon: float, speed_kmh: float, headi
             "selection_weight": round(weight, 4),
         })
 
-    # 按选择权重降序（weight=0 的排到末尾但不删除，便于 iOS 决定如何处理）
+    # 按选择权重降序，剔除 weight=0 的（不在前方/太近/已播太多次）
     landmarks.sort(key=lambda x: x["selection_weight"], reverse=True)
+    landmarks = [lm for lm in landmarks if lm["selection_weight"] > 0]
     return landmarks[:max_results]

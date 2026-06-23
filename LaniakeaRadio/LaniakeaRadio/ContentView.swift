@@ -613,7 +613,9 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     // ─── 综合流程：查 → 过滤 → 选 ─────────────────────────
     func fetchAndSelectPOI() async {
         let candidates = await fetchUpcomingLandmarks()
-        let filtered = filterByLocalHistory(candidates)
+        // 过滤掉权重为 0 的（已在后方/太近/播过太多次），避免 DeepSeek 选中但不能播
+        let viable = candidates.filter { ($0.selection_weight ?? 0) > 0 }
+        let filtered = filterByLocalHistory(viable)
         
         DispatchQueue.main.async {
             self.candidatePOIs = candidates.map(POIInfo.init)
@@ -626,6 +628,7 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
         
         let poiInfo = POIInfo(from: best)
+        print("🔍 [fetchAndSelectPOI] 选中POI: \(best.name) selection_weight(raw): \(best.selection_weight ?? -1) poiInfo: \(poiInfo.selection_weight)")
         self.selectedPOI = poiInfo
         self.selectedPOIName = best.name
         // 「准备播报」由调用方在通过阈值检查后再设置，避免误导
