@@ -91,6 +91,7 @@ STYLE_POOL = [
     ("两人像损友一样互相抬杠调侃，但氛围友好", "语气开心活泼，充满能量"),
     ("一个正经介绍、一个插科打诨逗哏", "语气温暖治愈，像深夜电台"),
     ("两人一起感叹和共鸣", "语气充满好奇和探索感"),
+    ("A用导游风格正式介绍，B吐槽加调侃，像相声捧逗", "语气幽默轻松，有节奏感"),
 ]
 
 CONTENT_HINTS = [
@@ -128,7 +129,11 @@ def build_radio_prompt(payload, cached_knowledge: str = "") -> str:
             music_str += f"（{payload.artist}）"
         elements.append(music_str)
 
-    # ─── 2. 随机选几个额外元素 ───
+    # ─── 2. 随机选几个额外元素（静止时排除车速） ───
+    # 若 speed=0，移除车速元素以提升其他元素概率
+    if payload.speed_kmh <= 0:
+        elements = [e for e in elements if "车速" not in e and "行驶" not in e]
+    
     roll = random.random()
     if roll < 0.25:
         num_extras = 0
