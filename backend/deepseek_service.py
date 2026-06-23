@@ -47,8 +47,12 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
     bing_results = []
 
     if cached:
-        # ─── 缓存命中，但检查相关性 ───
-        if payload.poi_name not in cached:
+        # ─── 缓存命中，先检查是否为 "仅用模型" 标记 ───
+        if cached == "__MODEL_ONLY__":
+            logger.info(f"📚 之前已判定「{payload.poi_name}」无有效网络资料，直接用模型知识")
+            knowledge_source = "model"
+            cached = None  # 不注入任何知识块
+        elif payload.poi_name not in cached:
             logger.info(f"⚠️ 缓存内容不包含 POI 名「{payload.poi_name}」，丢弃缓存，回退联网搜索")
             cached = None
         else:
@@ -91,7 +95,17 @@ async def generate_radio_script(payload: RealTimeLocationPayload) -> tuple[list,
                     )
                     logger.info(f"✅ 已缓存 {len(bing_results)} 条搜索结果到知识库 ({relevant_count} 条相关)")
                 else:
-                    logger.info(f"⚠️ 搜索结果不相关 ({relevant_count}/{len(bing_results)} 条提及「{payload.poi_name}」)，放弃缓存，用模型知识")
+                    # 标记为"无有效资料"，避免重复搜索
+                    await save_knowledge(
+                        poi_name=payload.poi_name,
+                        knowledge_text="__MODEL_ONLY__",
+                        province=payload.province,
+                        city=payload.city,
+                        district=payload.district,
+                        latitude=payload.lat,
+                        longitude=payload.lon,
+                    )
+                    logger.info(f"⚠️ 搜索结果不相关 ({relevant_count}/{len(bing_results)} 条提及「{payload.poi_name}」)，标记为模型知识，不再搜索")
                     knowledge_source = "model"
             else:
                 logger.info("ℹ️ 搜索无结果，回退到模型知识")
