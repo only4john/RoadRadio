@@ -580,40 +580,18 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
     
-    // ─── 第三步：DeepSeek 选最佳 ──────────────────────────
-    func selectBestLandmark(from filtered: [RawPOICandidate]) async -> (RawPOICandidate?, String) {
-        guard !filtered.isEmpty else { return (nil, "") }
-        
-        // 如果只剩一个，直接返回
-        if filtered.count == 1 { return (filtered[0], "（唯一候选）") }
-        
-        guard let url = URL(string: "\(serverBaseURL)/select-best-landmark") else { return (filtered.first, "") }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let payload = SelectBestLandmarkPayload(candidates: filtered)
-        request.httpBody = try? JSONEncoder().encode(payload)
-        
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return (filtered.first, "") }
-            let decoded = try JSONDecoder().decode(SelectBestLandmarkResponse.self, from: data)
-            if let selected = decoded.selected_landmark {
-                let reason = decoded.reason ?? ""
-                print("[✅ DeepSeek选中] \(selected.name) — \(reason)")
-                return (selected, reason)
-            }
-        } catch {
-            print("[⚠️ DeepSeek选POI失败] \(error)")
-        }
-        return (filtered.first, "")
+    // ─── 第三步：前端本地选最佳 POI（不调后端，避免丢失 selection_weight）────
+    func selectBestPOI(from filtered: [RawPOICandidate]) -> RawPOICandidate? {
+        guard !filtered.isEmpty else { return nil }
+        if filtered.count == 1 { return filtered[0] }
+        // 按 selection_weight 降序选最高权重的
+        return filtered.max(by: { ($0.selection_weight ?? 0) < ($1.selection_weight ?? 0) })
     }
     
     // ─── 综合流程：查 → 过滤 → 选 ─────────────────────────
     func fetchAndSelectPOI() async {
         let candidates = await fetchUpcomingLandmarks()
-        // 过滤掉权重为 0 的（已在后方/太近/播过太多次），避免 DeepSeek 选中但不能播
+        // 过滤掉权重为 0 的（已在后方/太近/播过太多次）
         let viable = candidates.filter { ($0.selection_weight ?? 0) > 0 }
         let filtered = filterByLocalHistory(viable)
         
@@ -621,17 +599,16 @@ class RadioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             self.candidatePOIs = candidates.map(POIInfo.init)
         }
         
-        let (best, reason) = await selectBestLandmark(from: filtered)
-        guard let best = best else {
+        guard let best = selectBestPOI(from: filtered) else {
             print("[⚠️ 无可用POI] 候选\(candidates.count)个，过滤后0个")
             return
         }
         
         let poiInfo = POIInfo(from: best)
-        print("🔍 [fetchAndSelectPOI] 选中POI: \(best.name) selection_weight(raw): \(best.selection_weight ?? -1) poiInfo: \(poiInfo.selection_weight)")
+        print("🔍 [fetchAndSelectPOI] 选中POI: \(best.name) weight: \(poiInfo.selection_weight)")
         self.selectedPOI = poiInfo
         self.selectedPOIName = best.name
-        // 「准备播报」由调用方在通过阈值检查后再设置，避免误导
+        self.deepseekReason = "（前端选最高权重）"
         self.deepseekReason = reason
     }
 
