@@ -7,7 +7,7 @@
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
-		<false/>
+		<true/>
 	</dict>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>用于获取当前正在播放的歌曲名称，以便在电台播报中提及。</string>

@@ -5,7 +5,7 @@ import sqlite3
 import json
 import httpx
 from datetime import datetime, timezone
-from config import POI_KNOWLEDGE_DB, DEEPSEEK_API_KEY, DEEPSEEK_API_URL, DEEPSEEK_MODEL
+from config import POI_KNOWLEDGE_DB, DEEPSEEK_API_KEY, DEEPSEEK_API_URL, DEEPSEEK_LIGHT_MODEL
 
 DB_PATH = POI_KNOWLEDGE_DB
 
@@ -26,7 +26,7 @@ async def _summarize_knowledge(text: str, max_chars: int = 1000) -> str:
 
     prompt = SUMMARIZE_PROMPT.format(max_chars=max_chars, text=text)
     request_body = {
-        "model": DEEPSEEK_MODEL,
+        "model": DEEPSEEK_LIGHT_MODEL,
         "messages": [
             {"role": "system", "content": "你是一个知识管理员，擅长提炼和总结景点信息。"},
             {"role": "user", "content": prompt}

@@ -32,7 +32,9 @@ if not DEEPSEEK_API_KEY:
     print("⚠️  警告: DEEPSEEK_API_KEY 未设置，请配置 .env 文件")
 DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions")
 DEEPSEEK_REQUEST_TIMEOUT = float(os.getenv("DEEPSEEK_TIMEOUT", "30.0"))
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+# 轻量模型：用于搜索判别、选 POI、资料总结等简单任务，更省 token
+DEEPSEEK_LIGHT_MODEL = os.getenv("DEEPSEEK_LIGHT_MODEL", "deepseek-chat")
 
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
 MINIMAX_GROUP_ID = os.getenv("MINIMAX_GROUP_ID", "")

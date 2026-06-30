@@ -10,6 +10,7 @@ from config import (
     DEEPSEEK_API_URL,
     DEEPSEEK_REQUEST_TIMEOUT,
     DEEPSEEK_MODEL,
+    DEEPSEEK_LIGHT_MODEL,
     DEEPSEEK_SYSTEM_PROMPT,
     build_radio_prompt,
     logger,
@@ -205,7 +206,7 @@ async def select_best_landmark(candidates: list) -> dict:
 只返回严格 JSON：{{"index": 数字, "name": "POI名称", "reason": "一句话理由"}}"""
 
     request_body = {
-        "model": DEEPSEEK_MODEL,
+        "model": DEEPSEEK_LIGHT_MODEL,
         "messages": [
             {"role": "system", "content": "你是一个旅行家，擅长挑选最有故事的地标。只输出 JSON。"},
             {"role": "user", "content": prompt}

@@ -7,7 +7,7 @@ import httpx
 from config import (
     DEEPSEEK_API_KEY,
     DEEPSEEK_API_URL,
-    DEEPSEEK_MODEL,
+    DEEPSEEK_LIGHT_MODEL,
 )
 
 CLASSIFIER_PROMPT = """你是一个搜索判别器。判断以下地标/景点是否需要联网搜索来获取更丰富的介绍信息。
@@ -59,7 +59,7 @@ async def classify_needs_search(poi_name: str, province: str = "", city: str = "
     query = f"{location_hint}{poi_name}" if location_hint else poi_name
 
     request_body = {
-        "model": DEEPSEEK_MODEL,
+        "model": DEEPSEEK_LIGHT_MODEL,
         "messages": [
             {"role": "system", "content": CLASSIFIER_PROMPT},
             {"role": "user", "content": f"地标：{query}"}

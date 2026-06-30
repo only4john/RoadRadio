@@ -85,15 +85,15 @@ def wgs84_to_gcj02(lat: float, lon: float) -> tuple[float, float]:
 
 def normalize_search_radius(speed_kmh: float) -> int:
     if speed_kmh <= 0:
-        return 200  # 静止时 200m
+        return 300  # 静止时 300m
     elif speed_kmh <= 30:
-        return 300
-    elif speed_kmh <= 70:
         return 500
-    elif speed_kmh <= 100:
+    elif speed_kmh <= 70:
         return 800
+    elif speed_kmh <= 100:
+        return 1200
     else:
-        return 1000
+        return 2000
 
 
 def format_location(lat: float, lon: float) -> str:
@@ -234,7 +234,7 @@ def is_poi_ahead_in_direction(car_lat: float, car_lon: float, car_heading: int,
     if speed_kmh < 2.0:
         return True
 
-    heading_tolerance = 30  # ±30°，即前方 60° 扇形
+    heading_tolerance = 60  # ±60°，即前方 120° 扇形
 
     poi_pos = _parse_location(poi_location_str)
     if not poi_pos:
